@@ -60,9 +60,12 @@ async function bootstrap() {
   app.set(
     "trust proxy",
     process.env.TRUST_PROXY === "true"
-      ? (process.env.TRUSTED_PROXIES || "loopback")
-          .split(/[\s,]+/)
-          .filter(Boolean)
+      ? [
+          "loopback",
+          ...(process.env.TRUSTED_PROXIES || "")
+            .split(/[\s,]+/)
+            .filter(Boolean),
+        ]
       : "loopback",
   );
 

@@ -77,6 +77,15 @@ jobs:
           docker exec pingvin-test caddy validate --config /opt/app/reverse-proxy/Caddyfile.trust-proxy --adapter caddyfile
         env:
           SMOKE_FRONTEND: "true"
+      - name: Verify explicitly trusted proxy client addresses
+        run: |
+          gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+          docker run -d --name pingvin-proxy-test -p 127.0.0.1:18081:3000 -e TRUST_PROXY=true -e "TRUSTED_PROXIES=${gateway}/32" pingvin-share:test
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18081/api/health; then break; fi
+            sleep 2
+          done
+          node scripts/proxy-smoke.mjs
       - name: Pull pinned vulnerability scanner
         run: docker pull "$TRIVY_IMAGE"
       - name: Scan container and reject vulnerabilities with available fixes
@@ -101,7 +110,9 @@ jobs:
           docker push "ghcr.io/enzimo/pingvin-share:${GITHUB_REF_NAME}-${ARCH}"
       - name: Container logs
         if: failure()
-        run: docker logs pingvin-test || true
+        run: |
+          docker logs pingvin-test || true
+          docker logs pingvin-proxy-test || true
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: image

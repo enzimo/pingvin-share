@@ -83,10 +83,10 @@ jobs:
           TRIVY_ARCH: ${{ matrix.trivy_arch }}
         run: |
           mkdir -p "$RUNNER_TEMP/trivy"
-          gh release download v0.76.1 --repo aquasecurity/trivy --dir "$RUNNER_TEMP/trivy" --pattern "trivy_0.76.1_Linux_${TRIVY_ARCH}.tar.gz" --pattern 'trivy_0.76.1_checksums.txt'
+          gh release download v0.76.1 --repo aquasecurity/trivy --dir "$RUNNER_TEMP/trivy" --pattern "trivy_0.76.1_Linux-${TRIVY_ARCH}.tar.gz" --pattern 'trivy_0.76.1_checksums.txt'
           cd "$RUNNER_TEMP/trivy"
           sha256sum --check --ignore-missing trivy_0.76.1_checksums.txt
-          tar -xzf "trivy_0.76.1_Linux_${TRIVY_ARCH}.tar.gz" trivy
+          tar -xzf "trivy_0.76.1_Linux-${TRIVY_ARCH}.tar.gz" trivy
       - name: Scan container and reject vulnerabilities with available fixes
         run: |
           "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output scan-${{ matrix.arch }}.json pingvin-share:test

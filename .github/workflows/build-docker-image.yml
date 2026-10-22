@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+env:
+  TRIVY_IMAGE: aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c # 0.76.1
 permissions:
   contents: read
 jobs:
@@ -50,10 +52,8 @@ jobs:
         include:
           - runner: ubuntu-24.04
             arch: amd64
-            trivy_arch: 64bit
           - runner: ubuntu-24.04-arm
             arch: arm64
-            trivy_arch: ARM64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
@@ -77,20 +77,12 @@ jobs:
           docker exec pingvin-test caddy validate --config /opt/app/reverse-proxy/Caddyfile.trust-proxy --adapter caddyfile
         env:
           SMOKE_FRONTEND: "true"
-      - name: Install verified Trivy binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TRIVY_ARCH: ${{ matrix.trivy_arch }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/trivy"
-          gh release download v0.76.1 --repo aquasecurity/trivy --dir "$RUNNER_TEMP/trivy" --pattern "trivy_0.76.1_Linux-${TRIVY_ARCH}.tar.gz" --pattern 'trivy_0.76.1_checksums.txt'
-          cd "$RUNNER_TEMP/trivy"
-          sha256sum --check --ignore-missing trivy_0.76.1_checksums.txt
-          tar -xzf "trivy_0.76.1_Linux-${TRIVY_ARCH}.tar.gz" trivy
+      - name: Pull pinned vulnerability scanner
+        run: docker pull "$TRIVY_IMAGE"
       - name: Scan container and reject vulnerabilities with available fixes
         run: |
-          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output scan-${{ matrix.arch }}.json pingvin-share:test
-          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --ignore-unfixed --exit-code 1 pingvin-share:test
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/work" -v "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" -w /work "$TRIVY_IMAGE" image --scanners vuln --format json --output scan-${{ matrix.arch }}.json pingvin-share:test
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/work" -v "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" -w /work "$TRIVY_IMAGE" image --scanners vuln --ignore-unfixed --exit-code 1 pingvin-share:test
       - name: Preserve scan evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

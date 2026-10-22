@@ -1,21 +1,27 @@
 /** @type {import('next').NextConfig} */
-const { version } = require('./package.json');
+const { version } = require("./package.json");
 
-const withPWA = require("next-pwa")({
-  dest: "public",
-  disable: process.env.NODE_ENV === "development",
-  reloadOnOnline: false,
-  runtimeCaching: [
-    {
-      urlPattern: /^https?.*/,
-      handler: 'NetworkOnly',
-    },
-  ],
-  reloadOnOnline: false,
-});
-
-module.exports = withPWA({
-  output: "standalone", env: {
+module.exports = {
+  outputFileTracingRoot: __dirname,
+  output: "standalone",
+  env: {
     VERSION: version,
   },
-});
+  // Files remain available as downloads; untrusted images bypass native decoding.
+  images: { unoptimized: true },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "same-origin" },
+          {
+            key: "Content-Security-Policy",
+            value: "base-uri 'self'; object-src 'none'; frame-ancestors 'none'",
+          },
+        ],
+      },
+    ];
+  },
+};

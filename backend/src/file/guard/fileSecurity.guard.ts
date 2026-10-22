@@ -1,3 +1,4 @@
+import { routeId } from "src/utils/routeId.util";
 import {
   ExecutionContext,
   ForbiddenException,
@@ -5,11 +6,12 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Request } from "express";
-import * as moment from "moment";
+import moment from "moment";
 import { PrismaService } from "src/prisma/prisma.service";
 import { ShareSecurityGuard } from "src/share/guard/shareSecurity.guard";
 import { ShareService } from "src/share/share.service";
 import { ConfigService } from "src/config/config.service";
+import { AuthService } from "src/auth/auth.service";
 
 @Injectable()
 export class FileSecurityGuard extends ShareSecurityGuard {
@@ -17,6 +19,7 @@ export class FileSecurityGuard extends ShareSecurityGuard {
     private _shareService: ShareService,
     private _prisma: PrismaService,
     _config: ConfigService,
+    private readonly auth: AuthService,
   ) {
     super(_shareService, _prisma, _config);
   }
@@ -24,18 +27,16 @@ export class FileSecurityGuard extends ShareSecurityGuard {
   async canActivate(context: ExecutionContext) {
     const request: Request = context.switchToHttp().getRequest();
 
-    const shareId = Object.prototype.hasOwnProperty.call(
-      request.params,
-      "shareId",
-    )
-      ? request.params.shareId
-      : request.params.id;
+    const shareId = routeId(
+      request,
+      "shareId" in request.params ? "shareId" : "id",
+    );
 
     const shareToken = request.cookies[`share_${shareId}_token`];
 
     const share = await this._prisma.share.findUnique({
       where: { id: shareId },
-      include: { security: true },
+      include: { security: true, reverseShare: true },
     });
 
     // If there is no share token the user requests a file directly
@@ -46,6 +47,16 @@ export class FileSecurityGuard extends ShareSecurityGuard {
           !moment(share.expiration).isSame(0))
       ) {
         throw new NotFoundException("File not found");
+      }
+
+      if (share.reverseShare && !share.reverseShare.publicAccess) {
+        const userId = await this.auth.getIdOfCurrentUser(request);
+        if (
+          !userId ||
+          (userId !== share.creatorId &&
+            userId !== share.reverseShare.creatorId)
+        )
+          throw new ForbiddenException("This reverse share is private");
       }
 
       if (share.security?.password)

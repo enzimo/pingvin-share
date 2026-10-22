@@ -15,7 +15,7 @@ import { Request, Response } from "express";
 import { nanoid } from "nanoid";
 import { AuthService } from "../auth/auth.service";
 import { GetUser } from "../auth/decorator/getUser.decorator";
-import { JwtGuard } from "../auth/guard/jwt.guard";
+import { AuthenticatedGuard } from "../auth/guard/authenticated.guard";
 import { ConfigService } from "../config/config.service";
 import { OAuthCallbackDto } from "./dto/oauthCallback.dto";
 import { ErrorPageExceptionFilter } from "./filter/errorPageException.filter";
@@ -41,7 +41,7 @@ export class OAuthController {
   }
 
   @Get("status")
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async status(@GetUser() user: User) {
     return this.oauthService.status(user);
   }
@@ -55,7 +55,12 @@ export class OAuthController {
   ) {
     const state = nanoid(16);
     const url = await this.providers[provider].getAuthEndpoint(state);
-    response.cookie(`oauth_${provider}_state`, state, { sameSite: "lax" });
+    response.cookie(`oauth_${provider}_state`, state, {
+      sameSite: "lax",
+      httpOnly: true,
+      secure: this.config.get("general.secureCookies"),
+      maxAge: 5 * 60_000,
+    });
     response.redirect(url);
   }
 
@@ -68,6 +73,7 @@ export class OAuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
+    response.clearCookie(`oauth_${provider}_state`);
     const oauthToken = await this.providers[provider].getToken(query);
     const user = await this.providers[provider].getUserInfo(oauthToken, query);
     const id = await this.authService.getIdOfCurrentUser(request);
@@ -102,7 +108,7 @@ export class OAuthController {
   }
 
   @Post("unlink/:provider")
-  @UseGuards(JwtGuard, ProviderGuard)
+  @UseGuards(AuthenticatedGuard, ProviderGuard)
   @UseFilters(ErrorPageExceptionFilter)
   unlink(@GetUser() user: User, @Param("provider") provider: string) {
     return this.oauthService.unlink(user, provider);

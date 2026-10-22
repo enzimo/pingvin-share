@@ -1,3 +1,4 @@
+import { routeId } from "src/utils/routeId.util";
 import {
   CanActivate,
   ExecutionContext,
@@ -5,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Request } from "express";
-import * as moment from "moment";
+import moment from "moment";
 import { PrismaService } from "src/prisma/prisma.service";
 
 @Injectable()
@@ -14,12 +15,10 @@ export class ShareTokenSecurity implements CanActivate {
 
   async canActivate(context: ExecutionContext) {
     const request: Request = context.switchToHttp().getRequest();
-    const shareId = Object.prototype.hasOwnProperty.call(
-      request.params,
-      "shareId",
-    )
-      ? request.params.shareId
-      : request.params.id;
+    const shareId = routeId(
+      request,
+      "shareId" in request.params ? "shareId" : "id",
+    );
 
     const share = await this.prisma.share.findUnique({
       where: { id: shareId },

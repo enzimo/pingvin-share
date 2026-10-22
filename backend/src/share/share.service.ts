@@ -6,10 +6,10 @@ import {
 } from "@nestjs/common";
 import { JwtService, JwtSignOptions } from "@nestjs/jwt";
 import { Share, User } from "@prisma/client";
-import * as archiver from "archiver";
+import archiver from "archiver";
 import * as argon from "argon2";
 import * as fs from "fs";
-import * as moment from "moment";
+import moment from "moment";
 import { ClamScanService } from "src/clamscan/clamscan.service";
 import { ConfigService } from "src/config/config.service";
 import { EmailService } from "src/email/email.service";
@@ -262,6 +262,7 @@ export class ShareService {
       },
     });
 
+    if (!share) throw new NotFoundException("Share not found");
     if (share.removedReason)
       throw new NotFoundException(share.removedReason, "share_removed");
 

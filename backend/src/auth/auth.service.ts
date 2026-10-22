@@ -12,7 +12,7 @@ import { User } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import * as argon from "argon2";
 import { Request, Response } from "express";
-import * as moment from "moment";
+import moment from "moment";
 import { ConfigService } from "src/config/config.service";
 import { EmailService } from "src/email/email.service";
 import { PrismaService } from "src/prisma/prisma.service";
@@ -37,17 +37,19 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   async signUp(dto: AuthRegisterDTO, ip: string, isAdmin?: boolean) {
-    const isFirstUser = (await this.prisma.user.count()) == 0;
-
     const hash = dto.password ? await argon.hash(dto.password) : null;
     try {
-      const user = await this.prisma.user.create({
-        data: {
-          email: dto.email,
-          username: dto.username,
-          password: hash,
-          isAdmin: isAdmin ?? isFirstUser,
-        },
+      // Serialize initial-admin assignment with user creation.
+      const user = await this.prisma.$transaction(async (transaction) => {
+        const isFirstUser = (await transaction.user.count()) === 0;
+        return transaction.user.create({
+          data: {
+            email: dto.email,
+            username: dto.username,
+            password: hash,
+            isAdmin: isAdmin ?? isFirstUser,
+          },
+        });
       });
 
       const { refreshToken, refreshTokenId } = await this.createRefreshToken(
@@ -66,6 +68,7 @@ export class AuthService {
           );
         }
       }
+      throw e;
     }
   }
 
@@ -177,20 +180,26 @@ export class AuthService {
       throw new ForbiddenException("Password sign in is disabled");
 
     const user = await this.prisma.user.findFirst({
-      where: { resetPasswordToken: { token } },
+      where: { resetPasswordToken: { token, expiresAt: { gt: new Date() } } },
     });
 
     if (!user) throw new BadRequestException("Token invalid or expired");
 
     const newPasswordHash = await argon.hash(newPassword);
 
-    await this.prisma.resetPasswordToken.delete({
-      where: { token },
-    });
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { password: newPasswordHash },
+    await this.prisma.$transaction(async (transaction) => {
+      // Recheck expiry and consume once inside the password-change transaction.
+      const consumed = await transaction.resetPasswordToken.deleteMany({
+        where: { token, userId: user.id, expiresAt: { gt: new Date() } },
+      });
+      if (consumed.count !== 1)
+        throw new BadRequestException("Token invalid or expired");
+      await transaction.user.update({
+        where: { id: user.id },
+        data: { password: newPasswordHash },
+      });
+      await transaction.refreshToken.deleteMany({ where: { userId: user.id } });
+      await transaction.loginToken.deleteMany({ where: { userId: user.id } });
     });
   }
 
@@ -230,10 +239,17 @@ export class AuthService {
   }
 
   async signOut(accessToken: string) {
-    const { refreshTokenId } =
-      (this.jwtService.decode(accessToken) as {
-        refreshTokenId: string;
-      }) || {};
+    let refreshTokenId: string;
+    try {
+      const claims = await this.jwtService.verifyAsync(accessToken, {
+        secret: this.config.get("internal.jwtSecret"),
+        algorithms: ["HS256"],
+        ignoreExpiration: true,
+      });
+      refreshTokenId = claims.refreshTokenId;
+    } catch {
+      return;
+    }
 
     if (refreshTokenId) {
       const oauthIDToken = await this.prisma.refreshToken
@@ -335,6 +351,7 @@ export class AuthService {
     const isSecure = this.config.get("general.secureCookies");
     if (accessToken)
       response.cookie("access_token", accessToken, {
+        httpOnly: true,
         sameSite: "lax",
         secure: isSecure,
         maxAge: 1000 * 60 * 60 * 24 * 30 * 3, // 3 months
@@ -367,17 +384,28 @@ export class AuthService {
           secret: this.config.get("internal.jwtSecret"),
         },
       );
-      return payload.sub;
+      const session = await this.prisma.refreshToken.findFirst({
+        where: {
+          id: payload.refreshTokenId,
+          userId: payload.sub,
+          expiresAt: { gt: new Date() },
+        },
+      });
+      return session ? payload.sub : null;
     } catch {
       return null;
     }
   }
 
   async verifyPassword(user: User, password: string) {
-    if (!user.password && this.config.get("ldap.enabled")) {
-      return !!this.ldapService.authenticateUser(user.username, password);
+    if (user.ldapDN && this.config.get("ldap.enabled")) {
+      return !!(await this.ldapService.authenticateUser(
+        user.username,
+        password,
+      ));
     }
 
+    if (!user.password || !password) return false;
     return argon.verify(user.password, password);
   }
 }

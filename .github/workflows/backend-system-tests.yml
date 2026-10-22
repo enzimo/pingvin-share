@@ -1,23 +1,18 @@
-name: Backend system tests
-
+name: Pull request security checks
 on:
   pull_request:
-    branches:
-      - main
-  push:
-    tags:
-      - "v*"
-
+    branches: [main]
+permissions:
+  contents: read
 jobs:
-  system-tests:
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    container: node:22
+  tests:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Dependencies
-        working-directory: ./backend
-        run: npm install
-      - name: Run Server and Test with Newman
-        working-directory: ./backend
-        run: npm run test:system
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - run: npm ci && npm run build && npm run test:security && npm audit --include=dev
+        working-directory: backend
+      - run: npm ci && npm run build && npm run test:security && npm audit --include=dev
+        working-directory: frontend

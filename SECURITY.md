@@ -1,9 +1,13 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+This Enzimo fork maintains the current release. The archived upstream image
+does not receive fixes from this repository. Use the release notes and the
+published container digest to identify exactly what you are deploying.
 
-Older versions of Pingvin Share do not receive security updates. To ensure your system remains secure, we strongly recommend updating Pingvin Share regularly. You can automate these updates using tools like [Watchtower](https://github.com/containrrr/watchtower).
+Report suspected vulnerabilities privately through GitHub's
+[private vulnerability reporting](https://github.com/enzimo/pingvin-share/security/advisories/new).
+Do not post exploit details in a public issue before maintainers have assessed them.
 
-## Reporting a Vulnerability
-
-Thank you for taking the time to report a vulnerability. Please DO NOT create an issue on GitHub because the vulnerability could get exploited. Instead please write an email to [elias@eliasschneider.com](mailto:elias@eliasschneider.com).
+Release builds run dependency audits, regression tests, container smoke tests,
+and image vulnerability scans. Review the attached scan evidence and update
+regularly; a clean scan cannot detect every vulnerability.

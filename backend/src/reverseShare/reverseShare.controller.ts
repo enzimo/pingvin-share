@@ -11,7 +11,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 import { User } from "@prisma/client";
 import { GetUser } from "src/auth/decorator/getUser.decorator";
-import { JwtGuard } from "src/auth/guard/jwt.guard";
+import { AuthenticatedGuard } from "src/auth/guard/authenticated.guard";
 import { ConfigService } from "src/config/config.service";
 import { CreateReverseShareDTO } from "./dto/createReverseShare.dto";
 import { ReverseShareDTO } from "./dto/reverseShare.dto";
@@ -27,7 +27,7 @@ export class ReverseShareController {
   ) {}
 
   @Post()
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async create(@Body() body: CreateReverseShareDTO, @GetUser() user: User) {
     const token = await this.reverseShareService.create(body, user.id);
 
@@ -39,7 +39,7 @@ export class ReverseShareController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 60,
+      ttl: 60_000,
     },
   })
   @Get(":reverseShareToken")
@@ -54,7 +54,7 @@ export class ReverseShareController {
   }
 
   @Get()
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async getAllByUser(@GetUser() user: User) {
     return new ReverseShareTokenWithShares().fromList(
       await this.reverseShareService.getAllByUser(user.id),
@@ -62,7 +62,7 @@ export class ReverseShareController {
   }
 
   @Delete(":reverseShareId")
-  @UseGuards(JwtGuard, ReverseShareOwnerGuard)
+  @UseGuards(AuthenticatedGuard, ReverseShareOwnerGuard)
   async remove(@Param("reverseShareId") id: string) {
     await this.reverseShareService.remove(id);
   }

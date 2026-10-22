@@ -6,10 +6,13 @@ const useTranslate = () => {
   const intl = useIntl();
   return (
     id: string,
-    values?: Parameters<typeof intl.formatMessage>[1],
+    values?: Record<
+      string,
+      string | number | boolean | Date | null | undefined
+    >,
     opts?: Parameters<typeof intl.formatMessage>[2],
   ) => {
-    return intl.formatMessage({ id }, values, opts) as string;
+    return intl.formatMessage({ id }, values, opts);
   };
 };
 
@@ -29,10 +32,13 @@ export const translateOutsideContext = () => {
   );
   return (
     id: string,
-    values?: Parameters<typeof intl.formatMessage>[1],
+    values?: Record<
+      string,
+      string | number | boolean | Date | null | undefined
+    >,
     opts?: Parameters<typeof intl.formatMessage>[2],
   ) => {
-    return intl.formatMessage({ id }, values, opts) as string;
+    return intl.formatMessage({ id }, values, opts);
   };
 };
 

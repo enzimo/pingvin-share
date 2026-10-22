@@ -155,6 +155,10 @@ export class OAuthService {
       ]);
     }
 
+    if (user.emailVerified !== true) {
+      throw new ErrorPageException("unverified_account");
+    }
+
     const existingUser: User = await this.prisma.user.findFirst({
       where: {
         email: user.email,
@@ -162,16 +166,10 @@ export class OAuthService {
     });
 
     if (existingUser) {
-      await this.prisma.oAuthUser.create({
-        data: {
-          provider: user.provider,
-          providerUserId: user.providerId.toString(),
-          providerUsername: user.providerUsername,
-          userId: existingUser.id,
-        },
-      });
-      await this.updateIsAdmin(existingUser.id, user.isAdmin);
-      return this.auth.generateToken(existingUser, { idToken: user.idToken });
+      // Matching an email is not proof of ownership of the local account.
+      throw new ErrorPageException("already_linked", "/auth/signIn", [
+        `provider_${user.provider}`,
+      ]);
     }
 
     const result = await this.auth.signUp(
@@ -197,7 +195,7 @@ export class OAuthService {
   }
 
   private async updateIsAdmin(userId: string, isAdmin?: boolean) {
-    if (!isAdmin) return;
+    if (isAdmin === undefined) return;
     await this.prisma.user.update({
       where: {
         id: userId,

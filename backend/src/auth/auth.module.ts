@@ -16,7 +16,7 @@ import { OAuthModule } from "../oauth/oauth.module";
     }),
     EmailModule,
     forwardRef(() => OAuthModule),
-    UserModule,
+    forwardRef(() => UserModule),
   ],
   controllers: [AuthController],
   providers: [AuthService, AuthTotpService, JwtStrategy, LdapService],

@@ -1,55 +1,126 @@
-name: Build and Push Docker Image
-
+name: Security checks and Docker release
 on:
-  release:
-    types: [published]
-
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
 jobs:
-  build:
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - name: checkout code
-        uses: actions/checkout@v3
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            ${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}},prefix=v
-            type=semver,pattern={{major}}.{{minor}},prefix=v
-            type=semver,pattern={{major}},prefix=v
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+            docs/package-lock.json
+            scripts/package-lock.json
+      - name: Install and audit all dependency trees
+        run: |
+          for directory in . backend frontend docs scripts; do
+            (cd "$directory" && npm ci --include=dev && npm audit --include=dev)
+          done
+      - name: Build and verify
+        run: |
+          cd backend
+          npx prisma generate
+          npm run build
+          npm run lint
+          npm run test:security
+          cd ../frontend
+          npm run lint
+          npm run test:security
+          npm run build
+          cd ..
+          node --test vendor/braces/security.test.cjs
+          npm --prefix docs run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+  image:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+            trivy_arch: 64bit
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            trivy_arch: ARM64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+          node-version: "24"
+      - name: Build container
+        run: docker build --pull --label org.opencontainers.image.source=https://github.com/enzimo/pingvin-share --label org.opencontainers.image.revision="$GITHUB_SHA" --label org.opencontainers.image.version=1.14.0 -t pingvin-share:test .
+      - name: Verify fresh startup and HTTP security
+        run: |
+          docker run -d --name pingvin-test -p 127.0.0.1:18080:3000 pingvin-share:test
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18080/api/health; then break; fi
+            sleep 2
+          done
+          node scripts/security-smoke.mjs
+          docker exec pingvin-test caddy validate --config /opt/app/reverse-proxy/Caddyfile.trust-proxy --adapter caddyfile
+        env:
+          SMOKE_FRONTEND: "true"
+      - name: Install verified Trivy binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIVY_ARCH: ${{ matrix.trivy_arch }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy"
+          gh release download v0.76.1 --repo aquasecurity/trivy --dir "$RUNNER_TEMP/trivy" --pattern "trivy_0.76.1_Linux_${TRIVY_ARCH}.tar.gz" --pattern 'trivy_0.76.1_checksums.txt'
+          cd "$RUNNER_TEMP/trivy"
+          sha256sum --check --ignore-missing trivy_0.76.1_checksums.txt
+          tar -xzf "trivy_0.76.1_Linux_${TRIVY_ARCH}.tar.gz" trivy
+      - name: Scan container and reject vulnerabilities with available fixes
+        run: |
+          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --format json --output scan-${{ matrix.arch }}.json pingvin-share:test
+          "$RUNNER_TEMP/trivy/trivy" image --scanners vuln --ignore-unfixed --exit-code 1 pingvin-share:test
+      - name: Preserve scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password:  ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: image-scan-${{ matrix.arch }}
+          path: scan-${{ matrix.arch }}.json
+      - name: Publish tested architecture
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker tag pingvin-share:test "ghcr.io/enzimo/pingvin-share:${GITHUB_REF_NAME}-${ARCH}"
+          docker push "ghcr.io/enzimo/pingvin-share:${GITHUB_REF_NAME}-${ARCH}"
+      - name: Container logs
+        if: failure()
+        run: docker logs pingvin-test || true
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Publish multi-architecture tags
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker buildx imagetools create -t "ghcr.io/enzimo/pingvin-share:${GITHUB_REF_NAME}" -t ghcr.io/enzimo/pingvin-share:latest "ghcr.io/enzimo/pingvin-share:${GITHUB_REF_NAME}-amd64" "ghcr.io/enzimo/pingvin-share:${GITHUB_REF_NAME}-arm64"

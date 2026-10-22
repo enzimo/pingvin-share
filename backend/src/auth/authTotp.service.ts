@@ -6,7 +6,7 @@ import {
 } from "@nestjs/common";
 import { User } from "@prisma/client";
 import { authenticator, totp } from "otplib";
-import * as qrcode from "qrcode-svg";
+import qrcode from "qrcode-svg";
 import { ConfigService } from "src/config/config.service";
 import { PrismaService } from "src/prisma/prisma.service";
 import { AuthService } from "./auth.service";
@@ -48,10 +48,12 @@ export class AuthTotpService {
     }
 
     // Set the login token to used
-    await this.prisma.loginToken.update({
-      where: { token: token.token },
+    const consumed = await this.prisma.loginToken.updateMany({
+      where: { token: token.token, used: false, expiresAt: { gt: new Date() } },
       data: { used: true },
     });
+    if (consumed.count !== 1)
+      throw new UnauthorizedException("Invalid login token");
 
     const { refreshToken, refreshTokenId } =
       await this.authService.createRefreshToken(token.user.id);
@@ -64,7 +66,7 @@ export class AuthTotpService {
   }
 
   async enableTotp(user: User, password: string) {
-    if (!this.authService.verifyPassword(user, password))
+    if (!(await this.authService.verifyPassword(user, password)))
       throw new ForbiddenException("Invalid password");
 
     // Check if we have a secret already
@@ -106,7 +108,7 @@ export class AuthTotpService {
   }
 
   async verifyTotp(user: User, password: string, code: string) {
-    if (!this.authService.verifyPassword(user, password))
+    if (!(await this.authService.verifyPassword(user, password)))
       throw new ForbiddenException("Invalid password");
 
     const { totpSecret } = await this.prisma.user.findUnique({
@@ -135,7 +137,7 @@ export class AuthTotpService {
   }
 
   async disableTotp(user: User, password: string, code: string) {
-    if (!this.authService.verifyPassword(user, password))
+    if (!(await this.authService.verifyPassword(user, password)))
       throw new ForbiddenException("Invalid password");
 
     const { totpSecret } = await this.prisma.user.findUnique({

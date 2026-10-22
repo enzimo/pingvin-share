@@ -43,6 +43,8 @@ export class LdapService {
     username: string,
     password: string,
   ): Promise<Entry | null> {
+    // Empty passwords can result in an unauthenticated LDAP bind.
+    if (!username || !password) return null;
     if (!username.match(/^[a-zA-Z0-9-_.@]+$/)) {
       this.logger.verbose(
         `Username ${username} does not match username pattern. Authentication failed.`,
@@ -100,6 +102,8 @@ export class LdapService {
     } catch (error) {
       this.logger.warn(`Connect error: ${inspect(error)}`);
       return null;
+    } finally {
+      await ldapClient.unbind().catch(() => undefined);
     }
   }
 }

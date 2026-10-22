@@ -71,7 +71,7 @@ export class DiscordProvider implements OAuthProvider<DiscordToken> {
       },
     });
     const user = (await res.json()) as DiscordUser;
-    if (user.verified === false) {
+    if (user.verified !== true) {
       throw new ErrorPageException("unverified_account", undefined, [
         "provider_discord",
       ]);
@@ -91,6 +91,7 @@ export class DiscordProvider implements OAuthProvider<DiscordToken> {
       providerId: user.id,
       providerUsername: user.global_name ?? user.username,
       email: user.email,
+      emailVerified: true,
       idToken: `discord:${token.idToken}`,
     };
   }

@@ -37,6 +37,7 @@ yarn-error.log*
 # PWA
 /frontend/public/workbox-*
 /frontend/public/sw.*
+!/frontend/public/sw.js
 
 # project specific
 /backend/data/

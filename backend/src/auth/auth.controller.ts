@@ -26,7 +26,7 @@ import { ResetPasswordDTO } from "./dto/resetPassword.dto";
 import { TokenDTO } from "./dto/token.dto";
 import { UpdatePasswordDTO } from "./dto/updatePassword.dto";
 import { VerifyTotpDTO } from "./dto/verifyTotp.dto";
-import { JwtGuard } from "./guard/jwt.guard";
+import { AuthenticatedGuard } from "./guard/authenticated.guard";
 
 @Controller("auth")
 export class AuthController {
@@ -40,7 +40,7 @@ export class AuthController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 5 * 60,
+      ttl: 5 * 60_000,
     },
   })
   async signUp(
@@ -66,7 +66,7 @@ export class AuthController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 5 * 60,
+      ttl: 5 * 60_000,
     },
   })
   @HttpCode(200)
@@ -92,7 +92,7 @@ export class AuthController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 5 * 60,
+      ttl: 5 * 60_000,
     },
   })
   @HttpCode(200)
@@ -115,7 +115,7 @@ export class AuthController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 5 * 60,
+      ttl: 5 * 60_000,
     },
   })
   @HttpCode(202)
@@ -127,7 +127,7 @@ export class AuthController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 5 * 60,
+      ttl: 5 * 60_000,
     },
   })
   @HttpCode(204)
@@ -136,7 +136,7 @@ export class AuthController {
   }
 
   @Patch("password")
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async updatePassword(
     @GetUser() user: User,
     @Res({ passthrough: true }) response: Response,
@@ -194,19 +194,19 @@ export class AuthController {
   }
 
   @Post("totp/enable")
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async enableTotp(@GetUser() user: User, @Body() body: EnableTotpDTO) {
     return this.authTotpService.enableTotp(user, body.password);
   }
 
   @Post("totp/verify")
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async verifyTotp(@GetUser() user: User, @Body() body: VerifyTotpDTO) {
     return this.authTotpService.verifyTotp(user, body.password, body.code);
   }
 
   @Post("totp/disable")
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async disableTotp(@GetUser() user: User, @Body() body: VerifyTotpDTO) {
     // Note: We use VerifyTotpDTO here because it has both fields we need: password and totp code
     return this.authTotpService.disableTotp(user, body.password, body.code);

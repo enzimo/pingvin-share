@@ -15,6 +15,7 @@ import { Response } from "express";
 import { GetUser } from "src/auth/decorator/getUser.decorator";
 import { AdministratorGuard } from "src/auth/guard/isAdmin.guard";
 import { JwtGuard } from "src/auth/guard/jwt.guard";
+import { AuthenticatedGuard } from "src/auth/guard/authenticated.guard";
 import { ConfigService } from "../config/config.service";
 import { CreateUserDTO } from "./dto/createUser.dto";
 import { UpdateOwnUserDTO } from "./dto/updateOwnUser.dto";
@@ -40,7 +41,7 @@ export class UserController {
   }
 
   @Patch("me")
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async updateCurrentUser(
     @GetUser() user: User,
     @Body() data: UpdateOwnUserDTO,
@@ -50,7 +51,7 @@ export class UserController {
 
   @Delete("me")
   @HttpCode(204)
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async deleteCurrentUser(
     @GetUser() user: User,
     @Res({ passthrough: true }) response: Response,
@@ -73,25 +74,25 @@ export class UserController {
 
   // Global user operations
   @Get()
-  @UseGuards(JwtGuard, AdministratorGuard)
+  @UseGuards(AuthenticatedGuard, AdministratorGuard)
   async list() {
     return new UserDTO().fromList(await this.userService.list());
   }
 
   @Post()
-  @UseGuards(JwtGuard, AdministratorGuard)
+  @UseGuards(AuthenticatedGuard, AdministratorGuard)
   async create(@Body() user: CreateUserDTO) {
     return new UserDTO().from(await this.userService.create(user));
   }
 
   @Patch(":id")
-  @UseGuards(JwtGuard, AdministratorGuard)
+  @UseGuards(AuthenticatedGuard, AdministratorGuard)
   async update(@Param("id") id: string, @Body() user: UpdateUserDto) {
     return new UserDTO().from(await this.userService.update(id, user));
   }
 
   @Delete(":id")
-  @UseGuards(JwtGuard, AdministratorGuard)
+  @UseGuards(AuthenticatedGuard, AdministratorGuard)
   async delete(@Param("id") id: string) {
     return new UserDTO().from(await this.userService.delete(id));
   }

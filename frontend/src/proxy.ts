@@ -11,7 +11,7 @@ export const config = {
   matcher: "/((?!api|static|.*\\..*|_next).*)",
 };
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const routes = {
     unauthenticated: new Routes(["/auth/*", "/"]),
     public: new Routes([

@@ -30,7 +30,7 @@ import { UserModule } from "./user/user.module";
     UserModule,
     ThrottlerModule.forRoot([
       {
-        ttl: 60,
+        ttl: 60_000,
         limit: 100,
       },
     ]),

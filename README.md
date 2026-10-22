@@ -1,18 +1,19 @@
-> ## ⚠️ Project Archived
->
-> Pingvin Share has been archived since Jun 29, 2025.
->
-> **I recommend you to checkout [Pingvin Share X](https://github.com/smp46/pingvin-share-x), a well-maintained fork as of May 2026.**
->
-> After much consideration, I've chosen to focus my limited time and energy on my other project, [Pocket ID](https://github.com/pocket-id/pocket-id). As a solo developer, I've found it difficult to actively maintain multiple open source projects with the care and attention they deserve.
->
-> Thanks to all the contributors and users who have supported Pingvin Share over the years :)
+# Pingvin Share
 
-# <div align="center"><img  src="https://user-images.githubusercontent.com/58886915/166198400-c2134044-1198-4647-a8b6-da9c4a204c68.svg" width="40"/> </br>Pingvin Share</div>
+Enzimo's security maintenance fork of [stonith404/Pingvin Share](https://github.com/stonith404/pingvin-share).
+The original project's BSD-2-Clause license and contributor history are preserved.
 
-[![](https://dcbadge.limes.pink/api/server/wHRQ9nFRcK)](https://discord.gg/wHRQ9nFRcK) [![](https://img.shields.io/badge/Crowdin-2E3340.svg?style=for-the-badge&logo=Crowdin&logoColor=white)](https://crowdin.com/project/pingvin-share) [![](https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=#white)](https://github.com/sponsors/stonith404)
+Use `ghcr.io/enzimo/pingvin-share:v1.14.0` for this fork. Read
+[the release notes](RELEASE_NOTES.md) before upgrading from the original image,
+especially the proxy, OAuth, and anonymous upload changes.
 
----
+```sh
+docker compose pull
+docker compose up -d
+```
+
+The supplied compose file keeps the original data mounts and port 3000.
+See [SECURITY.md](SECURITY.md) for supported versions and reporting.
 
 Pingvin Share is a self-hosted file sharing platform and an alternative for WeTransfer.
 

@@ -14,10 +14,9 @@ import { JwtService } from "@nestjs/jwt";
 import { Throttle } from "@nestjs/throttler";
 import { User } from "@prisma/client";
 import { Request, Response } from "express";
-import * as moment from "moment";
+import moment from "moment";
 import { GetUser } from "src/auth/decorator/getUser.decorator";
 import { AdministratorGuard } from "src/auth/guard/isAdmin.guard";
-import { JwtGuard } from "src/auth/guard/jwt.guard";
 import { AdminShareDTO } from "./dto/adminShare.dto";
 import { CreateShareDTO } from "./dto/createShare.dto";
 import { MyShareDTO } from "./dto/myShare.dto";
@@ -30,21 +29,24 @@ import { ShareSecurityGuard } from "./guard/shareSecurity.guard";
 import { ShareTokenSecurity } from "./guard/shareTokenSecurity.guard";
 import { ShareService } from "./share.service";
 import { CompletedShareDTO } from "./dto/shareComplete.dto";
+import { ConfigService } from "src/config/config.service";
+import { AuthenticatedGuard } from "src/auth/guard/authenticated.guard";
 @Controller("shares")
 export class ShareController {
   constructor(
     private shareService: ShareService,
     private jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get("all")
-  @UseGuards(JwtGuard, AdministratorGuard)
+  @UseGuards(AuthenticatedGuard, AdministratorGuard)
   async getAllShares() {
     return new AdminShareDTO().fromList(await this.shareService.getShares());
   }
 
   @Get()
-  @UseGuards(JwtGuard)
+  @UseGuards(AuthenticatedGuard)
   async getMyShares(@GetUser() user: User) {
     return new MyShareDTO().fromList(
       await this.shareService.getSharesByUser(user.id),
@@ -75,11 +77,35 @@ export class ShareController {
     @Body() body: CreateShareDTO,
     @Req() request: Request,
     @GetUser() user: User,
+    @Res({ passthrough: true }) response: Response,
   ) {
     const { reverse_share_token } = request.cookies;
-    return new ShareDTO().from(
-      await this.shareService.create(body, user, reverse_share_token),
+    const share = await this.shareService.create(
+      body,
+      user,
+      reverse_share_token,
     );
+    if (!user) {
+      const token = this.jwtService.sign(
+        {
+          purpose: "upload-owner",
+          shareId: share.id,
+          createdAt: share.createdAt.toISOString(),
+        },
+        {
+          secret: this.configService.get("internal.jwtSecret"),
+          expiresIn: "24h",
+        },
+      );
+      response.cookie(`share_${share.id}_owner`, token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: this.configService.get("general.secureCookies"),
+        path: `/api/shares/${share.id}`,
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+    }
+    return new ShareDTO().from(share);
   }
 
   @Post(":id/complete")
@@ -108,7 +134,7 @@ export class ShareController {
   @Throttle({
     default: {
       limit: 10,
-      ttl: 60,
+      ttl: 60_000,
     },
   })
   @Get("isShareIdAvailable/:id")
@@ -120,7 +146,7 @@ export class ShareController {
   @Throttle({
     default: {
       limit: 20,
-      ttl: 5 * 60,
+      ttl: 5 * 60_000,
     },
   })
   @UseGuards(ShareTokenSecurity)

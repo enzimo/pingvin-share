@@ -1,3 +1,4 @@
+import { routeId } from "src/utils/routeId.util";
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { User } from "@prisma/client";
 import { Request } from "express";
@@ -9,7 +10,7 @@ export class ReverseShareOwnerGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext) {
     const request: Request = context.switchToHttp().getRequest();
-    const { reverseShareId } = request.params;
+    const reverseShareId = routeId(request, "reverseShareId");
 
     const reverseShare = await this.prisma.reverseShare.findUnique({
       where: { id: reverseShareId },

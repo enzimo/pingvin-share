@@ -8,7 +8,7 @@ import { NestFactory, Reflector } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import * as bodyParser from "body-parser";
-import * as cookieParser from "cookie-parser";
+import cookieParser from "cookie-parser";
 import { NextFunction, Request, Response } from "express";
 import * as fs from "fs";
 import { AppModule } from "./app.module";
@@ -56,7 +56,15 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
-  app.set("trust proxy", true);
+  // The bundled Caddy connects on loopback. Other proxies require an allowlist.
+  app.set(
+    "trust proxy",
+    process.env.TRUST_PROXY === "true"
+      ? (process.env.TRUSTED_PROXIES || "loopback")
+          .split(/[\s,]+/)
+          .filter(Boolean)
+      : "loopback",
+  );
 
   await fs.promises.mkdir(`${DATA_DIRECTORY}/uploads/_temp`, {
     recursive: true,

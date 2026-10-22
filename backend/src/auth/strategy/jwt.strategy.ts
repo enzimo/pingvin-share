@@ -24,7 +24,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return req.cookies.access_token;
   }
 
-  async validate(payload: { sub: string }) {
+  async validate(payload: { sub: string; refreshTokenId?: string }) {
+    if (!payload.sub || !payload.refreshTokenId) return null;
+    const session = await this.prisma.refreshToken.findFirst({
+      where: {
+        id: payload.refreshTokenId,
+        userId: payload.sub,
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (!session) return null;
     const user: User = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });

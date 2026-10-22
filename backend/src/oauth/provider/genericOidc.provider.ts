@@ -8,11 +8,13 @@ import { OAuthCallbackDto } from "../dto/oauthCallback.dto";
 import { OAuthSignInDto } from "../dto/oauthSignIn.dto";
 import { ErrorPageException } from "../exceptions/errorPage.exception";
 import { OAuthProvider, OAuthToken } from "./oauthProvider.interface";
+import { createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 
 export abstract class GenericOidcProvider implements OAuthProvider<OidcToken> {
   protected discoveryUri: string;
   private configuration: OidcConfigurationCache;
   private jwk: OidcJwkCache;
+  private signingKeys: ReturnType<typeof createRemoteJWKSet>;
   private logger: Logger = new Logger(
     Object.getPrototypeOf(this).constructor.name,
   );
@@ -118,22 +120,18 @@ export abstract class GenericOidcProvider implements OAuthProvider<OidcToken> {
       adminAccess?: string;
     },
   ): Promise<OAuthSignInDto> {
-    const idTokenData = this.decodeIdToken(token.idToken);
+    const idTokenData = await this.verifyIdToken(token.idToken);
 
     if (!idTokenData) {
-      this.logger.error(
-        `Can not get ID Token from response ${JSON.stringify(token.rawToken, undefined, 2)}`,
-      );
+      this.logger.error("Cannot verify OIDC ID token");
       throw new InternalServerErrorException();
     }
 
     const key = `oauth-${this.name}-nonce-${query.state}`;
     const nonce = await this.cache.get(key);
     await this.cache.del(key);
-    if (nonce !== idTokenData.nonce) {
-      this.logger.error(
-        `Invalid nonce. Expected ${nonce}, but got ${idTokenData.nonce}`,
-      );
+    if (typeof nonce !== "string" || nonce !== idTokenData.nonce) {
+      this.logger.error("Invalid OIDC nonce");
       throw new ErrorPageException("invalid_token");
     }
 
@@ -155,11 +153,7 @@ export abstract class GenericOidcProvider implements OAuthProvider<OidcToken> {
         }
       } catch (e) {
         this.logger.warn(
-          `Roles not found at path ${roleConfig.path} in ID Token ${JSON.stringify(
-            idTokenData,
-            undefined,
-            2,
-          )}`,
+          "Configured roles claim is not present in OIDC ID token",
         );
       }
 
@@ -180,13 +174,7 @@ export abstract class GenericOidcProvider implements OAuthProvider<OidcToken> {
     }
 
     if (!username) {
-      this.logger.error(
-        `Can not get username from ID Token ${JSON.stringify(
-          idTokenData,
-          undefined,
-          2,
-        )}`,
-      );
+      this.logger.error("Cannot get username from OIDC ID token");
       throw new ErrorPageException("cannot_get_user_info", undefined, [
         `provider_${this.name}`,
       ]);
@@ -195,6 +183,7 @@ export abstract class GenericOidcProvider implements OAuthProvider<OidcToken> {
     return {
       provider: this.name as any,
       email: idTokenData.email,
+      emailVerified: idTokenData.email_verified === true,
       providerId: idTokenData.sub,
       providerUsername: username,
       ...(isAdmin !== undefined && { isAdmin }),
@@ -231,10 +220,39 @@ export abstract class GenericOidcProvider implements OAuthProvider<OidcToken> {
     this.discoveryUri = undefined;
     this.configuration = undefined;
     this.jwk = undefined;
+    this.signingKeys = undefined;
   }
 
-  private decodeIdToken(idToken: string): OidcIdToken {
-    return this.jwtService.decode(idToken) as OidcIdToken;
+  private async verifyIdToken(idToken: string): Promise<OidcIdToken> {
+    try {
+      const configuration = await this.getConfiguration();
+      this.signingKeys ??= createRemoteJWKSet(new URL(configuration.jwks_uri));
+      let issuer = configuration.issuer;
+      // Microsoft's tenant-independent discovery uses a tenant placeholder.
+      if (this.name === "microsoft" && issuer.includes("{tenantid}")) {
+        const tenant = decodeJwt(idToken).tid;
+        if (typeof tenant !== "string" || !/^[0-9a-f-]{36}$/i.test(tenant))
+          throw new Error("Invalid Microsoft tenant");
+        issuer = issuer.replace("{tenantid}", tenant);
+      }
+      const verified = await jwtVerify(idToken, this.signingKeys, {
+        issuer,
+        audience: this.config.get(`oauth.${this.name}-clientId`),
+        algorithms: [
+          "RS256",
+          "RS384",
+          "RS512",
+          "ES256",
+          "ES384",
+          "ES512",
+          "EdDSA",
+        ],
+        requiredClaims: ["iss", "sub", "aud", "exp", "iat", "nonce"],
+      });
+      return verified.payload as unknown as OidcIdToken;
+    } catch {
+      throw new ErrorPageException("invalid_token");
+    }
   }
 }
 
@@ -284,6 +302,7 @@ export interface OidcIdToken {
   exp: number;
   iat: number;
   email: string;
+  email_verified?: boolean;
   name: string;
   nickname: string;
   preferred_username: string;

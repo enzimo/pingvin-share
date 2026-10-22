@@ -39,6 +39,12 @@ RUN apk update --no-cache \
     && apk upgrade --no-cache \
     && apk add --no-cache curl caddy su-exec openssl
 
+# Runtime startup calls the bundled Prisma CLI directly. Package managers are
+# only needed in the build stages, and carry their own dependency trees.
+RUN rm -rf /usr/local/lib/node_modules/npm /opt/yarn-v* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx \
+        /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 WORKDIR /opt/app/frontend
 COPY --from=frontend-builder /opt/app/public ./public
 COPY --from=frontend-builder /opt/app/.next/standalone ./

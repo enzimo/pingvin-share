@@ -24,7 +24,9 @@ native amd64 and arm64 images before publishing a combined manifest.
   transaction, revoke existing sessions, and reject revoked access tokens.
 - Use HttpOnly access cookies and serialize initial administrator creation.
 - Upgrade to Next.js 16.4.2, sharp 0.35.5, current patched Nest 11 dependencies,
-  and Node 24. Disable the unused image optimizer.
+  and Node 24. Disable the unused image optimizer. Remove build-only npm and
+  Yarn tooling from the runtime image; startup runs the bundled Prisma CLI and
+  compiled seed directly.
 - Update dependency trees for the application and documentation. The documentation
   builder uses a local bounded-recursion patch for the currently unpatched
   braces package. See `vendor/braces/SECURITY-PATCH.md`.

@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { JwtService, JwtSignOptions } from "@nestjs/jwt";
@@ -9,6 +11,7 @@ import { Share, User } from "@prisma/client";
 import archiver from "archiver";
 import * as argon from "argon2";
 import * as fs from "fs";
+import { randomUUID } from "crypto";
 import moment from "moment";
 import { ClamScanService } from "src/clamscan/clamscan.service";
 import { ConfigService } from "src/config/config.service";
@@ -19,9 +22,13 @@ import { ReverseShareService } from "src/reverseShare/reverseShare.service";
 import { parseRelativeDateToAbsolute } from "src/utils/date.util";
 import { SHARE_DIRECTORY } from "../constants";
 import { CreateShareDTO } from "./dto/createShare.dto";
+import { AppendFileDTO } from "./dto/appendFile.dto";
 
 @Injectable()
 export class ShareService {
+  private readonly fileAdditions = new Map<string, Promise<void>>();
+  private readonly zipCreations = new Map<string, Promise<void>>();
+  private readonly logger = new Logger(ShareService.name);
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
@@ -105,25 +112,164 @@ export class ShareService {
     return shareTuple;
   }
 
-  async createZip(shareId: string) {
-    if (this.config.get("s3.enabled")) return;
+  async createZip(shareId: string): Promise<void> {
+    const existing = this.zipCreations.get(shareId);
+    if (existing !== undefined) {
+      await existing.catch(() => undefined);
+      const share = await this.prisma.share.findUnique({
+        where: { id: shareId },
+      });
+      if (share && !share.isZipReady) return this.createZip(shareId);
+      return;
+    }
+    const operation = Promise.resolve().then(async () => {
+      let ready = false;
+      while (!ready) {
+        const fileIds = await this.writeZip(shareId);
+        ready = await this.prisma.$transaction(async (transaction) => {
+          const current = await transaction.file.findMany({
+            where: { shareId },
+            select: { id: true },
+            orderBy: { id: "asc" },
+          });
+          if (
+            current.length !== fileIds.length ||
+            current.some((file, index) => file.id !== fileIds[index])
+          )
+            return false;
+          await transaction.share.update({
+            where: { id: shareId },
+            data: { isZipReady: true },
+          });
+          return true;
+        });
+      }
+    });
+    this.zipCreations.set(shareId, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.zipCreations.get(shareId) === operation)
+        this.zipCreations.delete(shareId);
+    }
+  }
+
+  private async writeZip(shareId: string) {
+    const share = await this.prisma.share.findUnique({
+      where: { id: shareId },
+    });
+    if (!share) throw new NotFoundException("Share not found");
 
     const path = `${SHARE_DIRECTORY}/${shareId}`;
 
-    const files = await this.prisma.file.findMany({ where: { shareId } });
+    const files = await this.prisma.file.findMany({
+      where: { shareId },
+      orderBy: { id: "asc" },
+    });
+    const fileIds = files.map((file) => file.id);
+    if (share.storageProvider === "S3") return fileIds;
     const archive = archiver("zip", {
       zlib: { level: this.config.get("share.zipCompressionLevel") },
     });
-    const writeStream = fs.createWriteStream(`${path}/archive.zip`);
-
-    for (const file of files) {
-      archive.append(fs.createReadStream(`${path}/${file.id}`), {
-        name: file.name,
+    const temporaryPath = `${path}/archive-${randomUUID()}.tmp`;
+    const writeStream = fs.createWriteStream(temporaryPath);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        archive.on("error", reject);
+        writeStream.on("error", reject);
+        writeStream.on("close", resolve);
+        archive.pipe(writeStream);
+        for (const file of files) {
+          const stream = fs.createReadStream(`${path}/${file.id}`);
+          stream.on("error", reject);
+          archive.append(stream, { name: file.name });
+        }
+        void archive.finalize().catch(reject);
       });
+      await fs.promises.rename(temporaryPath, `${path}/archive.zip`);
+      return fileIds;
+    } catch (error) {
+      archive.abort();
+      writeStream.destroy();
+      await fs.promises.rm(temporaryPath, { force: true });
+      throw error;
     }
+  }
 
-    archive.pipe(writeStream);
-    await archive.finalize();
+  private async getShareForFileAddition(id: string) {
+    const share = await this.prisma.share.findUnique({
+      where: { id },
+      include: { files: true, reverseShare: true },
+    });
+    if (
+      !share ||
+      share.removedReason ||
+      (share.expiration.getTime() !== 0 && share.expiration <= new Date())
+    )
+      throw new NotFoundException("Share not found");
+    if (!share.uploadLocked)
+      throw new ConflictException("Complete the share before adding files");
+    return share;
+  }
+
+  async getFileAdditionContext(id: string) {
+    const share = await this.getShareForFileAddition(id);
+    return {
+      id: share.id,
+      name: share.name,
+      fileNames: share.files.map((file) => file.name),
+      size: share.files.reduce((size, file) => size + Number(file.size), 0),
+      maxSize: Math.min(
+        Number(this.config.get("share.maxSize")),
+        share.reverseShare ? Number(share.reverseShare.maxShareSize) : Infinity,
+      ),
+    };
+  }
+
+  async appendFile(id: string, data: string, file: AppendFileDTO) {
+    // Serialize chunks for each share so size checks include earlier partials
+    // and concurrent administrators cannot publish an out-of-date ZIP.
+    const previous = this.fileAdditions.get(id) ?? Promise.resolve();
+    const operation = previous.then(async () => {
+      const share = await this.getShareForFileAddition(id);
+      if (share.files.some((existing) => existing.name === file.name))
+        throw new ConflictException("A file with this name already exists");
+      if (
+        file.chunkIndex >= file.totalChunks ||
+        (file.chunkIndex < file.totalChunks - 1 &&
+          Buffer.from(data, "base64").byteLength !==
+            Number(this.config.get("share.chunkSize")))
+      )
+        throw new BadRequestException("Invalid file chunks");
+      const result = await this.fileService.create(
+        data,
+        { index: file.chunkIndex, total: file.totalChunks },
+        { id: file.id, name: file.name },
+        id,
+        true,
+      );
+      if (file.chunkIndex === file.totalChunks - 1) {
+        void this.clamScanService
+          .checkAndRemove(id, [result.id])
+          .catch((error) =>
+            this.logger.error("Could not scan added file", error),
+          );
+        void this.createZip(id).catch((error) =>
+          this.logger.error("Could not prepare share ZIP", error),
+        );
+      }
+      return result;
+    });
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.fileAdditions.set(id, settled);
+    try {
+      return await operation;
+    } finally {
+      if (this.fileAdditions.get(id) === settled) this.fileAdditions.delete(id);
+    }
   }
 
   async complete(id: string, reverseShareToken?: string) {
@@ -147,8 +293,8 @@ export class ShareService {
 
     // Asynchronously create a zip of all files
     if (share.files.length > 1)
-      this.createZip(id).then(() =>
-        this.prisma.share.update({ where: { id }, data: { isZipReady: true } }),
+      void this.createZip(id).catch((error) =>
+        this.logger.error("Could not prepare share ZIP", error),
       );
 
     // Send email for each recipient
@@ -196,6 +342,8 @@ export class ShareService {
   }
 
   async revertComplete(id: string) {
+    if (this.fileAdditions.has(id) || this.zipCreations.has(id))
+      throw new ConflictException("Files are being updated");
     return this.prisma.share.update({
       where: { id },
       data: { uploadLocked: false, isZipReady: false },

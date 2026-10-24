@@ -1,6 +1,6 @@
 {
   "name": "pingvin-share-backend",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "scripts": {
     "build": "nest build",
     "dev": "cross-env NODE_ENV=development nest start --watch",
@@ -8,7 +8,7 @@
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --end-of-line=auto --write 'src/**/*.ts'",
     "test:system": "node ../scripts/security-smoke.mjs",
-    "test:security": "node --import tsx --test test/security.test.ts"
+    "test:security": "node --import tsx --test test/*.test.ts"
   },
   "prisma": {
     "seed": "node dist/prisma/seed/config.seed.js"
@@ -29,7 +29,7 @@
     "@prisma/client": "6.19.3",
     "archiver": "^7.0.1",
     "argon2": "^0.41.1",
-    "body-parser": "^2.2.0",
+    "body-parser": "^2.4.0",
     "cache-manager": "^6.4.2",
     "cacheable": "^1.9.0",
     "clamscan": "^2.4.0",
@@ -94,6 +94,8 @@
     "node": ">=22.12.0"
   },
   "overrides": {
+    "body-parser": "$body-parser",
+    "multer": "^2.5.0",
     "deepmerge-ts": "^8.0.2",
     "js-yaml": "^5.5.0",
     "qs": "^6.16.0"

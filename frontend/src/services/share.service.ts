@@ -32,6 +32,33 @@ const revertComplete = async (id: string) => {
   return (await api.delete(`shares/${id}/complete`)).data;
 };
 
+export type FileAdditionContext = {
+  id: string;
+  name?: string;
+  fileNames: string[];
+  size: number;
+  maxSize: number;
+};
+
+const getFileAdditionContext = async (
+  id: string,
+): Promise<FileAdditionContext> =>
+  (await api.get(`admin/shares/${id}/files`)).data;
+
+const appendFile = async (
+  shareId: string,
+  chunk: Blob,
+  file: { id: string; name: string },
+  chunkIndex: number,
+  totalChunks: number,
+): Promise<FileUploadResponse> =>
+  (
+    await api.post(`admin/shares/${shareId}/files`, chunk, {
+      headers: { "Content-Type": "application/octet-stream" },
+      params: { ...file, chunkIndex, totalChunks },
+    })
+  ).data;
+
 const get = async (id: string): Promise<Share> => {
   return (await api.get(`shares/${id}`)).data;
 };
@@ -146,6 +173,8 @@ export default {
   create,
   completeShare,
   revertComplete,
+  getFileAdditionContext,
+  appendFile,
   getShareToken,
   get,
   getFromOwner,

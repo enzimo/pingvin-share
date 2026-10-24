@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -36,6 +37,10 @@ export class S3FileService {
     {
       uploadId: string;
       parts: Array<{ ETag: string | undefined; PartNumber: number }>;
+      shareId: string;
+      name: string;
+      size: number;
+      nextChunk: number;
     }
   > = {};
 
@@ -49,7 +54,14 @@ export class S3FileService {
     chunk: { index: number; total: number },
     file: { id?: string; name: string },
     shareId: string,
+    allowCompleted = false,
   ) {
+    const share = await this.prisma.share.findUnique({
+      where: { id: shareId },
+    });
+    if (!share) throw new NotFoundException("Share not found");
+    if (share.uploadLocked && !allowCompleted)
+      throw new BadRequestException("Share is already completed");
     if (!file.id) {
       file.id = crypto.randomUUID();
     } else if (!isValidUUID(file.id)) {
@@ -57,6 +69,28 @@ export class S3FileService {
     }
 
     const buffer = Buffer.from(data, "base64");
+    const existing = this.multipartUploads[file.id];
+    if (
+      existing &&
+      (existing.shareId !== shareId || existing.name !== file.name)
+    )
+      throw new BadRequestException("Invalid multipart upload session");
+    if (chunk.index !== (existing?.nextChunk ?? 0))
+      throw new BadRequestException({
+        message: "Unexpected chunk received",
+        error: "unexpected_chunk_index",
+        expectedChunkIndex: existing?.nextChunk ?? 0,
+      });
+    if (
+      chunk.index === 0 &&
+      ((await this.prisma.file.findFirst({
+        where: { shareId, name: file.name },
+      })) ||
+        Object.values(this.multipartUploads).some(
+          (upload) => upload.shareId === shareId && upload.name === file.name,
+        ))
+    )
+      throw new ConflictException("A file with this name already exists");
     const key = `${this.getS3Path()}${shareId}/${file.name}`;
     const bucketName = this.config.get("s3.bucketName");
     const s3Instance = this.getS3Instance();
@@ -80,6 +114,10 @@ export class S3FileService {
         this.multipartUploads[file.id] = {
           uploadId,
           parts: [],
+          shareId,
+          name: file.name,
+          size: 0,
+          nextChunk: 0,
         };
       }
 
@@ -111,6 +149,8 @@ export class S3FileService {
         ETag: uploadPartResponse.ETag,
         PartNumber: partNumber,
       });
+      multipartUpload.size += buffer.byteLength;
+      multipartUpload.nextChunk++;
 
       // Complete the multipart upload if it's the last chunk
       if (chunk.index === chunk.total - 1) {
@@ -153,17 +193,36 @@ export class S3FileService {
     if (isLastChunk) {
       const fileSize: number = await this.getFileSize(shareId, file.name);
 
-      await this.prisma.file.create({
-        data: {
-          id: file.id,
-          name: file.name,
-          size: fileSize.toString(),
-          share: { connect: { id: shareId } },
-        },
-      });
+      await this.prisma.$transaction([
+        this.prisma.file.create({
+          data: {
+            id: file.id,
+            name: file.name,
+            size: fileSize.toString(),
+            share: { connect: { id: shareId } },
+          },
+        }),
+        this.prisma.share.update({
+          where: { id: shareId },
+          data: { isZipReady: false },
+        }),
+      ]);
     }
 
     return file;
+  }
+
+  getPendingSize(shareId: string) {
+    return Object.values(this.multipartUploads)
+      .filter((upload) => upload.shareId === shareId)
+      .reduce((size, upload) => size + upload.size, 0);
+  }
+
+  getExpectedChunkIndex(shareId: string, fileId: string) {
+    const upload = this.multipartUploads[fileId];
+    if (upload && upload.shareId !== shareId)
+      throw new BadRequestException("Invalid multipart upload session");
+    return upload?.nextChunk ?? 0;
   }
 
   async get(shareId: string, fileId: string): Promise<File> {

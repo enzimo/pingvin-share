@@ -6,12 +6,13 @@ import {
   Skeleton,
   Table,
   Text,
+  Tooltip,
 } from "@mantine/core";
 import { useClipboard } from "@mantine/hooks";
 import { useModals } from "@mantine/modals";
 import moment from "moment";
-import { TbLink, TbTrash } from "react-icons/tb";
-import { FormattedMessage } from "react-intl";
+import { TbFilePlus, TbLink, TbTrash } from "react-icons/tb";
+import { FormattedMessage, useIntl } from "react-intl";
 import useConfig from "../../../hooks/config.hook";
 import useTranslate from "../../../hooks/useTranslate.hook";
 import { MyShare } from "../../../types/share.type";
@@ -23,15 +24,22 @@ const ManageShareTable = ({
   shares,
   deleteShare,
   isLoading,
+  addFiles,
 }: {
   shares: MyShare[];
   deleteShare: (share: MyShare) => void;
   isLoading: boolean;
+  addFiles: (share: MyShare) => void;
 }) => {
   const modals = useModals();
   const clipboard = useClipboard();
   const config = useConfig();
   const t = useTranslate();
+  const intl = useIntl();
+  const addFilesLabel = intl.formatMessage({
+    id: "admin.shares.add-files",
+    defaultMessage: "Add files",
+  });
 
   return (
     <Box sx={{ display: "block", overflowX: "auto" }}>
@@ -82,6 +90,17 @@ const ManageShareTable = ({
                   </td>
                   <td>
                     <Group position="right">
+                      <Tooltip label={addFilesLabel}>
+                        <ActionIcon
+                          color="orange"
+                          variant="light"
+                          size={25}
+                          aria-label={addFilesLabel}
+                          onClick={() => addFiles(share)}
+                        >
+                          <TbFilePlus />
+                        </ActionIcon>
+                      </Tooltip>
                       <ActionIcon
                         color="victoria"
                         variant="light"

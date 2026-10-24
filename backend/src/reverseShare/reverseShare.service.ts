@@ -103,8 +103,8 @@ export class ReverseShareService {
     });
 
     for (const share of shares) {
-      await this.prisma.share.delete({ where: { id: share.id } });
       await this.fileService.deleteAllFiles(share.id);
+      await this.prisma.share.delete({ where: { id: share.id } });
     }
 
     await this.prisma.reverseShare.delete({ where: { id } });

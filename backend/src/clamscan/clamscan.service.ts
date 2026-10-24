@@ -1,9 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import NodeClam from "clamscan";
-import * as fs from "fs";
 import { FileService } from "src/file/file.service";
 import { PrismaService } from "src/prisma/prisma.service";
-import { CLAMAV_HOST, CLAMAV_PORT, SHARE_DIRECTORY } from "../constants";
+import { CLAMAV_HOST, CLAMAV_PORT } from "../constants";
 
 const clamscanConfig = {
   clamdscan: {
@@ -33,39 +32,37 @@ export class ClamScanService {
       return null;
     });
 
-  async check(shareId: string) {
+  async check(shareId: string, fileIds?: string[]) {
     const clamScan = await this.ClamScan;
 
     if (!clamScan) return [];
 
     const infectedFiles = [];
 
-    const files = fs
-      .readdirSync(`${SHARE_DIRECTORY}/${shareId}`)
-      .filter((file) => file != "archive.zip");
+    const files = await this.prisma.file.findMany({
+      where: { shareId, ...(fileIds && { id: { in: fileIds } }) },
+    });
 
-    for (const fileId of files) {
-      const { isInfected } = await clamScan
-        .isInfected(`${SHARE_DIRECTORY}/${shareId}/${fileId}`)
-        .catch(() => {
-          this.logger.log("ClamAV is not active");
-          return { isInfected: false };
-        });
-
-      const fileName = (
-        await this.prisma.file.findUnique({ where: { id: fileId } })
-      ).name;
-
-      if (isInfected) {
-        infectedFiles.push({ id: fileId, name: fileName });
+    for (const file of files) {
+      const stored = await this.fileService.get(shareId, file.id);
+      try {
+        const { isInfected } = await clamScan
+          .scanStream(stored.file)
+          .catch(() => {
+            this.logger.log("ClamAV is not active");
+            return { isInfected: false };
+          });
+        if (isInfected) infectedFiles.push({ id: file.id, name: file.name });
+      } finally {
+        stored.file.destroy();
       }
     }
 
     return infectedFiles;
   }
 
-  async checkAndRemove(shareId: string) {
-    const infectedFiles = await this.check(shareId);
+  async checkAndRemove(shareId: string, fileIds?: string[]) {
+    const infectedFiles = await this.check(shareId, fileIds);
 
     if (infectedFiles.length > 0) {
       await this.fileService.deleteAllFiles(shareId);

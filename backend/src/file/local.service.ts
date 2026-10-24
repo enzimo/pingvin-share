@@ -1,7 +1,5 @@
 import {
   BadRequestException,
-  HttpException,
-  HttpStatus,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -28,6 +26,7 @@ export class LocalFileService {
     chunk: { index: number; total: number },
     file: { id?: string; name: string },
     shareId: string,
+    allowCompleted = false,
   ) {
     if (!file.id) {
       file.id = crypto.randomUUID();
@@ -40,21 +39,14 @@ export class LocalFileService {
       include: { files: true, reverseShare: true },
     });
 
-    if (share.uploadLocked)
+    if (share.uploadLocked && !allowCompleted)
       throw new BadRequestException("Share is already completed");
 
-    let diskFileSize: number;
-    try {
-      diskFileSize = (
-        await fs.stat(`${SHARE_DIRECTORY}/${shareId}/${file.id}.tmp-chunk`)
-      ).size;
-    } catch {
-      diskFileSize = 0;
-    }
-
     // If the sent chunk index and the expected chunk index doesn't match throw an error
-    const chunkSize = this.config.get("share.chunkSize");
-    const expectedChunkIndex = Math.ceil(diskFileSize / chunkSize);
+    const expectedChunkIndex = await this.getExpectedChunkIndex(
+      shareId,
+      file.id,
+    );
 
     if (expectedChunkIndex != chunk.index)
       throw new BadRequestException({
@@ -72,25 +64,6 @@ export class LocalFileService {
       throw new InternalServerErrorException("Not enough space on the server");
     }
 
-    // Check if share size limit is exceeded
-    const fileSizeSum = share.files.reduce(
-      (n, { size }) => n + parseInt(size),
-      0,
-    );
-
-    const shareSizeSum = fileSizeSum + diskFileSize + buffer.byteLength;
-
-    if (
-      shareSizeSum > this.config.get("share.maxSize") ||
-      (share.reverseShare?.maxShareSize &&
-        shareSizeSum > parseInt(share.reverseShare.maxShareSize))
-    ) {
-      throw new HttpException(
-        "Max share size exceeded",
-        HttpStatus.PAYLOAD_TOO_LARGE,
-      );
-    }
-
     await fs.appendFile(
       `${SHARE_DIRECTORY}/${shareId}/${file.id}.tmp-chunk`,
       buffer,
@@ -105,17 +78,55 @@ export class LocalFileService {
       const fileSize = (
         await fs.stat(`${SHARE_DIRECTORY}/${shareId}/${file.id}`)
       ).size;
-      await this.prisma.file.create({
-        data: {
-          id: file.id,
-          name: file.name,
-          size: fileSize.toString(),
-          share: { connect: { id: shareId } },
-        },
-      });
+      await this.prisma.$transaction([
+        this.prisma.file.create({
+          data: {
+            id: file.id,
+            name: file.name,
+            size: fileSize.toString(),
+            share: { connect: { id: shareId } },
+          },
+        }),
+        this.prisma.share.update({
+          where: { id: shareId },
+          data: { isZipReady: false },
+        }),
+      ]);
     }
 
     return file;
+  }
+
+  async getPendingSize(shareId: string) {
+    const directory = `${SHARE_DIRECTORY}/${shareId}`;
+    const files = await fs.readdir(directory);
+    const sizes = await Promise.all(
+      files
+        .filter((name) => name.endsWith(".tmp-chunk"))
+        .map(async (name) => {
+          try {
+            return (await fs.stat(`${directory}/${name}`)).size;
+          } catch (error) {
+            if (error.code === "ENOENT") return 0;
+            throw error;
+          }
+        }),
+    );
+    return sizes.reduce((total, size) => total + size, 0);
+  }
+
+  async getExpectedChunkIndex(shareId: string, fileId: string) {
+    if (!isValidUUID(fileId))
+      throw new BadRequestException("Invalid file ID format");
+    try {
+      const stat = await fs.stat(
+        `${SHARE_DIRECTORY}/${shareId}/${fileId}.tmp-chunk`,
+      );
+      return Math.ceil(stat.size / Number(this.config.get("share.chunkSize")));
+    } catch (error) {
+      if (error.code === "ENOENT") return 0;
+      throw error;
+    }
   }
 
   async get(shareId: string, fileId: string) {

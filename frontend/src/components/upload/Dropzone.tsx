@@ -34,11 +34,15 @@ const useStyles = createStyles((theme) => ({
 
 const Dropzone = ({
   title,
+  description,
+  chooseFilesLabel,
   isUploading,
   maxShareSize,
   onFilesChanged,
 }: {
   title?: string;
+  description?: string;
+  chooseFilesLabel?: string;
   isUploading: boolean;
   maxShareSize: number;
   onFilesChanged: (files: FileUpload[]) => void;
@@ -83,10 +87,12 @@ const Dropzone = ({
             {title || <FormattedMessage id="upload.dropzone.title" />}
           </Text>
           <Text align="center" size="sm" mt="xs" color="dimmed">
-            <FormattedMessage
-              id="upload.dropzone.description"
-              values={{ maxSize: byteToHumanSizeString(maxShareSize) }}
-            />
+            {description || (
+              <FormattedMessage
+                id="upload.dropzone.description"
+                values={{ maxSize: byteToHumanSizeString(maxShareSize) }}
+              />
+            )}
           </Text>
         </div>
       </MantineDropzone>
@@ -96,6 +102,7 @@ const Dropzone = ({
           variant="light"
           size="sm"
           radius="xl"
+          aria-label={chooseFilesLabel || t("upload.dropzone.title")}
           disabled={isUploading}
           onClick={() => openRef.current && openRef.current()}
         >

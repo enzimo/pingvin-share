@@ -275,6 +275,16 @@ export default {
 
   // /admin/shares
   "admin.shares.title": "Share management",
+  "admin.shares.add-files": "Add files",
+  "admin.shares.add-files.choose-files": "Choose files",
+  "admin.shares.add-files.dropzone-description":
+    "Drop files here or choose files. Up to {size} available.",
+  "admin.shares.add-files.title": "Add files to {id}",
+  "admin.shares.add-files.description":
+    "Existing files and share settings are kept. Each completed file becomes available immediately.",
+  "admin.shares.add-files.current-size": "Current share size: {size}",
+  "admin.shares.add-files.duplicate":
+    "A file named {name} already exists or is selected.",
   "admin.shares.table.id": "Share ID",
   "admin.shares.table.username": "Creator",
   "admin.shares.table.visitors": "Visitors",

@@ -6,6 +6,7 @@ import { FileModule } from "src/file/file.module";
 import { ReverseShareModule } from "src/reverseShare/reverseShare.module";
 import { ShareController } from "./share.controller";
 import { ShareService } from "./share.service";
+import { AdminShareFilesController } from "./adminShareFiles.controller";
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { ShareService } from "./share.service";
     ReverseShareModule,
     forwardRef(() => FileModule),
   ],
-  controllers: [ShareController],
+  controllers: [ShareController, AdminShareFilesController],
   providers: [ShareService],
   exports: [ShareService],
 })

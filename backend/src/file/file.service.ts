@@ -1,4 +1,11 @@
-import { Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { LocalFileService } from "./local.service";
 import { S3FileService } from "./s3.service";
 import { ConfigService } from "src/config/config.service";
@@ -14,16 +21,10 @@ export class FileService {
     private configService: ConfigService,
   ) {}
 
-  // Determine which service to use based on the current config value
-  // shareId is optional -> can be used to overwrite a storage provider
   private getStorageService(
-    storageProvider?: string,
+    storageProvider: string,
   ): S3FileService | LocalFileService {
-    if (storageProvider != undefined)
-      return storageProvider == "S3"
-        ? this.s3FileService
-        : this.localFileService;
-    return this.configService.get("s3.enabled")
+    return storageProvider === "S3"
       ? this.s3FileService
       : this.localFileService;
   }
@@ -36,32 +37,82 @@ export class FileService {
       name: string;
     },
     shareId: string,
+    allowCompleted = false,
   ) {
-    const storageService = this.getStorageService();
-    return storageService.create(data, chunk, file, shareId);
+    const share = await this.prisma.share.findUnique({
+      where: { id: shareId },
+      include: { files: true, reverseShare: true },
+    });
+    if (!share) throw new NotFoundException("Share not found");
+    if (share.uploadLocked && !allowCompleted)
+      throw new BadRequestException("Share is already completed");
+    if (
+      file.id &&
+      (await this.prisma.file.findUnique({ where: { id: file.id } }))
+    )
+      throw new ConflictException("File already exists");
+
+    const storageService = this.getStorageService(share.storageProvider);
+    const expectedChunkIndex = file.id
+      ? await storageService.getExpectedChunkIndex(shareId, file.id)
+      : 0;
+    if (chunk.index !== expectedChunkIndex)
+      throw new BadRequestException({
+        message: "Unexpected chunk received",
+        error: "unexpected_chunk_index",
+        expectedChunkIndex,
+      });
+    const size =
+      share.files.reduce((sum, file) => sum + Number(file.size), 0) +
+      (await storageService.getPendingSize(shareId)) +
+      Buffer.from(data, "base64").byteLength;
+    if (
+      size > Number(this.configService.get("share.maxSize")) ||
+      (share.reverseShare && size > Number(share.reverseShare.maxShareSize))
+    )
+      throw new HttpException(
+        "Max share size exceeded",
+        HttpStatus.PAYLOAD_TOO_LARGE,
+      );
+
+    return storageService.create(data, chunk, file, shareId, allowCompleted);
   }
 
   async get(shareId: string, fileId: string): Promise<File> {
     const share = await this.prisma.share.findFirst({
       where: { id: shareId },
     });
+    if (!share) throw new NotFoundException("Share not found");
     const storageService = this.getStorageService(share.storageProvider);
     return storageService.get(shareId, fileId);
   }
 
   async remove(shareId: string, fileId: string) {
-    const storageService = this.getStorageService();
+    const storageService = await this.getShareStorageService(shareId);
     return storageService.remove(shareId, fileId);
   }
 
   async deleteAllFiles(shareId: string) {
-    const storageService = this.getStorageService();
+    const storageService = await this.getShareStorageService(shareId);
     return storageService.deleteAllFiles(shareId);
   }
 
   async getZip(shareId: string): Promise<Readable> {
-    const storageService = this.getStorageService();
+    const share = await this.prisma.share.findUnique({
+      where: { id: shareId },
+    });
+    if (!share) throw new NotFoundException("Share not found");
+    if (!share.isZipReady) throw new ConflictException("ZIP is being prepared");
+    const storageService = this.getStorageService(share.storageProvider);
     return await storageService.getZip(shareId);
+  }
+
+  private async getShareStorageService(shareId: string) {
+    const share = await this.prisma.share.findUnique({
+      where: { id: shareId },
+    });
+    if (!share) throw new NotFoundException("Share not found");
+    return this.getStorageService(share.storageProvider);
   }
 
   private async streamToUint8Array(stream: Readable): Promise<Uint8Array> {

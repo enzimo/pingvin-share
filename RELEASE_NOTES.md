@@ -1,3 +1,38 @@
+# v1.15.0 admin file additions
+
+Administrators can add files to an existing share from **Administration → Share
+management → Add files**. This works for another user's share, anonymous shares,
+and reverse shares. The image is `ghcr.io/enzimo/pingvin-share:v1.15.0` for Linux
+amd64 and arm64.
+
+Shares stay completed while files upload. Existing links, expiration dates,
+passwords, visitor limits, and ownership remain in place. Additions use the
+share's original storage provider and rebuild the ZIP without resending emails
+or consuming reverse-share uses. Only active, completed shares accept additions.
+Existing filenames cannot be overwritten. Global and reverse-share size limits
+include files already present and incomplete upload chunks.
+
+Each completed file becomes available individually. If an upload fails, files
+that already completed remain in the share and the dialog keeps the remaining
+files for retry. ZIP downloads pause while the archive is rebuilt. The existing
+ClamAV policy applies to added files; scanning uses file streams for local and
+S3 storage and ignores unfinished chunks and archives.
+
+This release also updates body-parser to 2.4.0 and multer to 2.5.0 for
+CVE-2026-111181 and CVE-2026-113872, reported after the previous scan. The
+documentation builder uses patched body-parser and serialize-javascript
+dependencies as well.
+
+There are no database schema changes or new configuration requirements. Back up
+your database, files, and configuration before upgrading.
+
+Validation covers 24 backend regressions, the frontend redirect regression,
+production builds and lint, and a browser upload to another user's share.
+The release workflow audits all five dependency trees and tests and scans both
+native Docker architectures. Scan reports accompany the release.
+
+---
+
 # v1.14.0 security release
 
 This Enzimo release keeps the v1.13 SQLite schema, data mounts, and upload API.

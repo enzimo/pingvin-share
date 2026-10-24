@@ -3,7 +3,7 @@
 Enzimo's security maintenance fork of [stonith404/Pingvin Share](https://github.com/stonith404/pingvin-share).
 The original project's BSD-2-Clause license and contributor history are preserved.
 
-Use `ghcr.io/enzimo/pingvin-share:v1.14.0` for this fork. Read
+Use `ghcr.io/enzimo/pingvin-share:v1.15.0` for this fork. Read
 [the release notes](RELEASE_NOTES.md) before upgrading from the original image,
 especially the proxy, OAuth, and anonymous upload changes.
 
@@ -20,6 +20,7 @@ Pingvin Share is a self-hosted file sharing platform and an alternative for WeTr
 ## ✨ Features
 
 - Share files using a link
+- Administrators can add files to existing shares
 - Unlimited file size (restricted only by disk space)
 - Set an expiration date for shares
 - Secure shares with visitor limits and passwords
@@ -28,6 +29,18 @@ Pingvin Share is a self-hosted file sharing platform and an alternative for WeTr
 - OIDC and LDAP authentication
 - Integration with ClamAV for security scans
 - Different file providers: local storage and S3
+
+### Add files to a share
+
+In **Administration → Share management**, click **Add files** beside a share,
+select the files, then click **Add files** in the dialog. Administrators can
+add to another user's share or an anonymous share. The share must be completed,
+active, and within its size limit. Existing filenames cannot be overwritten.
+
+The share link, expiry, password, and visitor limits stay in place. Completed
+files become available individually, and the ZIP is rebuilt. Additions do not
+resend completion emails or consume reverse-share uses. Local and S3 shares use
+their original storage provider.
 
 ## 🐧 Get to know Pingvin Share
 

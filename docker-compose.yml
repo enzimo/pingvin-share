@@ -1,6 +1,6 @@
 services:
   pingvin-share:
-    image: ghcr.io/enzimo/pingvin-share:v1.15.0
+    image: ghcr.io/enzimo/pingvin-share:v1.16.0
     restart: unless-stopped
     ports:
       - 3000:3000

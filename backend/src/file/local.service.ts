@@ -157,7 +157,13 @@ export class LocalFileService {
 
     await fs.unlink(`${SHARE_DIRECTORY}/${shareId}/${fileId}`);
 
-    await this.prisma.file.delete({ where: { id: fileId } });
+    await this.prisma.$transaction([
+      this.prisma.file.delete({ where: { id: fileId, shareId } }),
+      this.prisma.share.update({
+        where: { id: shareId },
+        data: { isZipReady: false },
+      }),
+    ]);
   }
 
   async deleteAllFiles(shareId: string) {

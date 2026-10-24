@@ -6,6 +6,7 @@ import { execFileSync, spawn, ChildProcess } from "node:child_process";
 import {
   mkdtempSync,
   mkdirSync,
+  existsSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -37,6 +38,7 @@ let logs = "";
 let passwordHash: string;
 
 const objects = new Map<string, Buffer>();
+const failedDeletes = new Set<string>();
 const multiparts = new Map<
   string,
   { key: string; parts: Map<number, Buffer> }
@@ -81,6 +83,15 @@ const s3 = createServer(async (request, response) => {
     multiparts.delete(uploadId);
     response.statusCode = 204;
     response.end();
+  } else if (request.method === "DELETE") {
+    if (failedDeletes.has(key)) {
+      response.statusCode = 403;
+      response.end("<Error><Code>AccessDenied</Code></Error>");
+    } else {
+      objects.delete(key);
+      response.statusCode = 204;
+      response.end();
+    }
   } else if (address.searchParams.has("list-type")) {
     const prefix = address.searchParams.get("prefix") || "";
     response.end(
@@ -175,6 +186,12 @@ const append = (
       jar: options.jar || admin,
     },
   );
+
+const removeFile = (shareId: string, fileId: string, jar = admin) =>
+  request(`/api/admin/shares/${shareId}/files/${fileId}`, {
+    method: "DELETE",
+    jar,
+  });
 
 async function fixture({
   size = 1,
@@ -594,7 +611,7 @@ test("empty files can be added to both local and S3 shares", async () => {
   }
 });
 
-test("local additions and reverse-share cleanup still use local storage after S3 is enabled", async () => {
+test("local file changes and reverse-share cleanup still use local storage after S3 is enabled", async () => {
   assert.equal(
     (
       await request("/api/configs/admin", {
@@ -611,6 +628,11 @@ test("local additions and reverse-share cleanup still use local storage after S3
     "original.txt": "a",
     "local.txt": "b",
   });
+  assert.equal((await removeFile(share.id, share.files[0].id)).status, 200);
+  await waitForZip(share.id);
+  assert.deepEqual(zipContents(join(path, "archive.zip")), {
+    "local.txt": "b",
+  });
   assert.equal(
     (
       await request(`/api/reverseShares/${reverse!.id}`, {
@@ -621,6 +643,193 @@ test("local additions and reverse-share cleanup still use local storage after S3
     200,
   );
   assert.equal(await prisma.share.count({ where: { id: share.id } }), 0);
+});
+
+test("admin file deletion rejects unauthenticated users, ordinary owners and cross-share IDs", async () => {
+  const { share, path } = await fixture();
+  const other = await fixture();
+  assert.equal((await append(share.id, "keep.txt", "b")).status, 201);
+  await waitForZip(share.id);
+  assert.equal(
+    (await removeFile(share.id, share.files[0].id, new Map())).status,
+    401,
+  );
+  assert.equal(
+    (await removeFile(share.id, share.files[0].id, owner)).status,
+    403,
+  );
+  assert.equal(
+    (await removeFile(share.id, other.share.files[0].id)).status,
+    404,
+  );
+  assert.equal((await removeFile(share.id, "not-a-uuid")).status, 400);
+  assert.equal(await prisma.file.count({ where: { shareId: share.id } }), 2);
+  assert.equal(readFileSync(join(path, share.files[0].id), "utf8"), "a");
+  assert.equal(
+    await prisma.file.count({ where: { shareId: other.share.id } }),
+    1,
+  );
+});
+
+test("admin deletion removes local and S3 contents and ZIP entries while preserving share policy", async () => {
+  for (const storage of ["LOCAL", "S3"]) {
+    const { share, path, reverse } = await fixture({
+      storage,
+      reverseLimit: 14,
+    });
+    const visitor = new Map<string, string>();
+    assert.equal(
+      (
+        await request(`/api/shares/${share.id}/token`, {
+          jar: visitor,
+          method: "POST",
+          body: { password: "share-test-password" },
+        })
+      ).status,
+      200,
+    );
+    const added = await append(share.id, "keep.txt", "keep");
+    assert.equal(added.status, 201);
+    await waitForZip(share.id);
+    const before = await prisma.share.findUniqueOrThrow({
+      where: { id: share.id },
+      include: { security: true, recipients: true },
+    });
+    const removed = await removeFile(share.id, share.files[0].id);
+    assert.equal(removed.status, 200, JSON.stringify(removed.data));
+    assert.deepEqual(removed.data.files, [
+      { id: added.data.id, name: "keep.txt", size: "4" },
+    ]);
+    assert.equal(removed.data.size, 4);
+    await waitForZip(share.id);
+    const after = await prisma.share.findUniqueOrThrow({
+      where: { id: share.id },
+      include: { security: true, recipients: true },
+    });
+    assert.deepEqual({ ...after, isZipReady: before.isZipReady }, before);
+    assert.equal(
+      (
+        await prisma.reverseShare.findUniqueOrThrow({
+          where: { id: reverse!.id },
+        })
+      ).remainingUses,
+      0,
+    );
+    assert.equal(
+      (
+        await request(`/api/shares/${share.id}/files/${share.files[0].id}`, {
+          jar: visitor,
+        })
+      ).status,
+      404,
+    );
+    assert.equal(
+      (
+        await request(`/api/shares/${share.id}/files/${added.data.id}`, {
+          jar: visitor,
+        })
+      ).bytes.toString(),
+      "keep",
+    );
+    const archive = await request(`/api/shares/${share.id}/files/zip`, {
+      jar: visitor,
+    });
+    assert.equal(archive.status, 200);
+    const zipPath = join(directory, `deleted-${storage}.zip`);
+    writeFileSync(zipPath, archive.bytes);
+    assert.deepEqual(zipContents(zipPath), { "keep.txt": "keep" });
+    if (storage === "LOCAL")
+      assert.equal(existsSync(join(path, share.files[0].id)), false);
+    else assert.equal(objects.has(`${share.id}/original.txt`), false);
+    assert.equal((await removeFile(share.id, share.files[0].id)).status, 404);
+  }
+});
+
+test("last-file protection holds for simultaneous administrator deletions", async () => {
+  const { share, path } = await fixture();
+  assert.equal((await removeFile(share.id, share.files[0].id)).status, 409);
+  const added = await append(share.id, "second.txt", "b");
+  assert.equal(added.status, 201);
+  await waitForZip(share.id);
+  const results = await Promise.all([
+    removeFile(share.id, share.files[0].id),
+    removeFile(share.id, added.data.id),
+  ]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  await waitForZip(share.id);
+  const files = await prisma.file.findMany({ where: { shareId: share.id } });
+  assert.equal(files.length, 1);
+  assert.deepEqual(Object.keys(zipContents(join(path, "archive.zip"))), [
+    files[0].name,
+  ]);
+});
+
+test("concurrent additions and deletions leave an accurate ZIP and permit reusing deleted names", async () => {
+  const { share, path } = await fixture();
+  assert.equal((await append(share.id, "keep.txt", "b")).status, 201);
+  const results = await Promise.all([
+    append(share.id, "extra.txt", "c"),
+    removeFile(share.id, share.files[0].id),
+  ]);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    [201, 200],
+  );
+  assert.equal((await append(share.id, "original.txt", "new")).status, 201);
+  await waitForZip(share.id);
+  assert.deepEqual(zipContents(join(path, "archive.zip")), {
+    "keep.txt": "b",
+    "extra.txt": "c",
+    "original.txt": "new",
+  });
+});
+
+test("a failed S3 deletion retains metadata, file contents and the downloadable ZIP", async () => {
+  const { share } = await fixture({ storage: "S3" });
+  assert.equal((await append(share.id, "keep.txt", "b")).status, 201);
+  await waitForZip(share.id);
+  const key = `${share.id}/original.txt`;
+  failedDeletes.add(key);
+  try {
+    assert.equal((await removeFile(share.id, share.files[0].id)).status, 500);
+    assert.equal(objects.get(key)!.toString(), "a");
+    assert.equal(await prisma.file.count({ where: { shareId: share.id } }), 2);
+    assert.equal(
+      (await prisma.share.findUniqueOrThrow({ where: { id: share.id } }))
+        .isZipReady,
+      true,
+    );
+  } finally {
+    failedDeletes.delete(key);
+  }
+  assert.equal((await removeFile(share.id, share.files[0].id)).status, 200);
+});
+
+test("deleted-share states and unfinished shares cannot be changed through admin deletion", async () => {
+  assert.equal((await removeFile("missing", randomUUID())).status, 404);
+  for (const overrides of [
+    { expiration: new Date(1) },
+    { removedReason: "malicious" },
+    { uploadLocked: false },
+  ]) {
+    const { share } = await fixture(overrides);
+    assert.equal(
+      (await removeFile(share.id, share.files[0].id)).status,
+      overrides.uploadLocked === false ? 409 : 404,
+    );
+    assert.equal(await prisma.file.count({ where: { shareId: share.id } }), 1);
+  }
+});
+
+test("administrators can delete individual files from anonymous shares", async () => {
+  const { share } = await fixture({ creatorId: null });
+  assert.equal((await append(share.id, "keep.txt", "b")).status, 201);
+  assert.equal((await removeFile(share.id, share.files[0].id)).status, 200);
+  assert.equal(
+    (await prisma.share.findUniqueOrThrow({ where: { id: share.id } }))
+      .creatorId,
+    null,
+  );
 });
 
 test("malware scanning streams only the added file, ignoring partial and archive files", async () => {

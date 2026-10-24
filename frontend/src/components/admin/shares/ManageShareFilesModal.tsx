@@ -1,5 +1,6 @@
 import {
   Alert,
+  ActionIcon,
   Button,
   Group,
   Loader,
@@ -9,6 +10,7 @@ import {
 } from "@mantine/core";
 import { AxiosError } from "axios";
 import { useEffect, useState } from "react";
+import { TbTrash } from "react-icons/tb";
 import { FormattedMessage, useIntl } from "react-intl";
 import useConfig from "../../../hooks/config.hook";
 import useConfirmLeave from "../../../hooks/confirm-leave.hook";
@@ -16,7 +18,7 @@ import useTranslate from "../../../hooks/useTranslate.hook";
 import shareService, {
   FileAdditionContext,
 } from "../../../services/share.service";
-import { FileUpload } from "../../../types/File.type";
+import { FileMetaData, FileUpload } from "../../../types/File.type";
 import { byteToHumanSizeString } from "../../../utils/fileSize.util";
 import toast from "../../../utils/toast.util";
 import Dropzone from "../../upload/Dropzone";
@@ -35,7 +37,7 @@ const newFileId = () => {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
 
-const AddShareFilesModal = ({
+const ManageShareFilesModal = ({
   shareId,
   onClose,
   onSaved,
@@ -51,13 +53,16 @@ const AddShareFilesModal = ({
   const [error, setError] = useState<string>();
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState<FileMetaData>();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const isBusy = isUploading || isDeleting;
   const label = intl.formatMessage({
     id: "admin.shares.add-files",
     defaultMessage: "Add files",
   });
   useConfirmLeave({
     message: t("upload.notify.confirm-leave"),
-    enabled: isUploading,
+    enabled: isBusy,
   });
 
   useEffect(() => {
@@ -68,6 +73,30 @@ const AddShareFilesModal = ({
         setError(error.response?.data?.message || t("common.error.unknown"));
       });
   }, [shareId]);
+
+  const removeFile = async () => {
+    if (!fileToDelete || isBusy) return;
+    setIsDeleting(true);
+    try {
+      setContext(await shareService.removeAdminFile(shareId, fileToDelete.id));
+      setFileToDelete(undefined);
+      toast.success(t("share.edit.notify.save-success"));
+      onSaved();
+    } catch (error) {
+      toast.axiosError(error);
+      // Another administrator may already have changed the file list.
+      try {
+        const refreshed = await shareService.getFileAdditionContext(shareId);
+        setContext(refreshed);
+        setFileToDelete(undefined);
+        onSaved();
+      } catch {
+        setError(t("common.error.unknown"));
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const selectFiles = (selected: FileUpload[]) => {
     const names = new Set([
@@ -173,31 +202,89 @@ const AddShareFilesModal = ({
     <Modal
       opened
       onClose={() => {
-        if (!isUploading) onClose();
+        if (!isBusy) onClose();
       }}
       title={intl.formatMessage(
         {
-          id: "admin.shares.add-files.title",
-          defaultMessage: "Add files to {id}",
+          id: "admin.shares.manage-files.title",
+          defaultMessage: "Manage files in {id}",
         },
         { id: shareId },
       )}
       size="lg"
-      closeOnClickOutside={!isUploading}
-      closeOnEscape={!isUploading}
-      withCloseButton={!isUploading}
+      closeOnClickOutside={!isBusy}
+      closeOnEscape={!isBusy}
+      withCloseButton={!isBusy}
     >
       <Stack>
         <Text size="sm" color="dimmed">
           <FormattedMessage
-            id="admin.shares.add-files.description"
-            defaultMessage="Existing files and share settings are kept. Each completed file becomes available immediately."
+            id="admin.shares.manage-files.description"
+            defaultMessage="Add or delete files here. Changes take effect immediately. The share link and access settings stay the same."
           />
         </Text>
         {error && <Alert color="red">{error}</Alert>}
         {!context && !error && <Loader />}
         {context && (
           <>
+            <Stack spacing="xs">
+              {context.files.map((file) => (
+                <Group key={file.id} position="apart" noWrap>
+                  <Text size="sm" sx={{ overflowWrap: "anywhere" }}>
+                    {file.name}
+                    <Text component="span" color="dimmed" ml="xs">
+                      {byteToHumanSizeString(Number(file.size))}
+                    </Text>
+                  </Text>
+                  <ActionIcon
+                    color="red"
+                    variant="light"
+                    disabled={isBusy || context.files.length <= 1}
+                    aria-label={intl.formatMessage(
+                      {
+                        id: "admin.shares.manage-files.delete-file",
+                        defaultMessage: "Delete {name}",
+                      },
+                      { name: file.name },
+                    )}
+                    onClick={() => setFileToDelete(file)}
+                  >
+                    <TbTrash />
+                  </ActionIcon>
+                </Group>
+              ))}
+            </Stack>
+            {context.files.length <= 1 && (
+              <Text size="xs" color="dimmed">
+                <FormattedMessage
+                  id="admin.shares.manage-files.last-file"
+                  defaultMessage="A share must contain at least one file. Add a replacement first or delete the share."
+                />
+              </Text>
+            )}
+            {fileToDelete && (
+              <Alert color="red">
+                <Text size="sm">
+                  <FormattedMessage
+                    id="admin.shares.manage-files.confirm-delete"
+                    defaultMessage="Permanently delete {name} from this share?"
+                    values={{ name: fileToDelete.name }}
+                  />
+                </Text>
+                <Group position="right" mt="sm">
+                  <Button
+                    variant="default"
+                    disabled={isBusy}
+                    onClick={() => setFileToDelete(undefined)}
+                  >
+                    <FormattedMessage id="common.button.cancel" />
+                  </Button>
+                  <Button color="red" loading={isDeleting} onClick={removeFile}>
+                    <FormattedMessage id="common.button.delete" />
+                  </Button>
+                </Group>
+              </Alert>
+            )}
             <Text size="sm">
               <FormattedMessage
                 id="admin.shares.add-files.current-size"
@@ -223,7 +310,7 @@ const AddShareFilesModal = ({
                   ),
                 },
               )}
-              isUploading={isUploading}
+              isUploading={isBusy}
               maxShareSize={Math.max(0, remaining - selectedSize)}
               onFilesChanged={selectFiles}
             />
@@ -231,20 +318,25 @@ const AddShareFilesModal = ({
               <FileList
                 files={files}
                 setFiles={(next) => {
-                  if (!isUploading) setFiles(next);
+                  if (!isBusy) setFiles(next);
                 }}
               />
             )}
           </>
         )}
         <Group position="right">
-          <Button variant="default" disabled={isUploading} onClick={onClose}>
+          <Button variant="default" disabled={isBusy} onClick={onClose}>
             <FormattedMessage id="common.button.cancel" />
           </Button>
           <Button
             loading={isUploading}
             disabled={
-              !context || !files.length || selectedSize > remaining || !!error
+              !context ||
+              !files.length ||
+              selectedSize > remaining ||
+              !!error ||
+              !!fileToDelete ||
+              isDeleting
             }
             onClick={upload}
           >
@@ -256,4 +348,4 @@ const AddShareFilesModal = ({
   );
 };
 
-export default AddShareFilesModal;
+export default ManageShareFilesModal;

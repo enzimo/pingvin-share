@@ -65,7 +65,7 @@ jobs:
         with:
           node-version: "24"
       - name: Build container
-        run: docker build --pull --label org.opencontainers.image.source=https://github.com/enzimo/pingvin-share --label org.opencontainers.image.revision="$GITHUB_SHA" --label org.opencontainers.image.version=1.15.0 -t pingvin-share:test .
+        run: docker build --pull --label org.opencontainers.image.source=https://github.com/enzimo/pingvin-share --label org.opencontainers.image.revision="$GITHUB_SHA" --label org.opencontainers.image.version=1.16.0 -t pingvin-share:test .
       - name: Verify fresh startup and HTTP security
         run: |
           docker run -d --name pingvin-test -p 127.0.0.1:18080:3000 pingvin-share:test

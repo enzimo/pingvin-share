@@ -277,7 +277,13 @@ export class S3FileService {
       throw new Error("Could not delete file from S3");
     }
 
-    await this.prisma.file.delete({ where: { id: fileId } });
+    await this.prisma.$transaction([
+      this.prisma.file.delete({ where: { id: fileId, shareId } }),
+      this.prisma.share.update({
+        where: { id: shareId },
+        data: { isZipReady: false },
+      }),
+    ]);
   }
 
   async deleteAllFiles(shareId: string) {

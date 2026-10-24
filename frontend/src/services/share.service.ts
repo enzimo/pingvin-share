@@ -1,6 +1,6 @@
 import { deleteCookie, setCookie } from "cookies-next";
 import mime from "mime-types";
-import { FileUploadResponse } from "../types/File.type";
+import { FileMetaData, FileUploadResponse } from "../types/File.type";
 
 import {
   CreateShare,
@@ -36,6 +36,7 @@ export type FileAdditionContext = {
   id: string;
   name?: string;
   fileNames: string[];
+  files: FileMetaData[];
   size: number;
   maxSize: number;
 };
@@ -58,6 +59,12 @@ const appendFile = async (
       params: { ...file, chunkIndex, totalChunks },
     })
   ).data;
+
+const removeAdminFile = async (
+  shareId: string,
+  fileId: string,
+): Promise<FileAdditionContext> =>
+  (await api.delete(`admin/shares/${shareId}/files/${fileId}`)).data;
 
 const get = async (id: string): Promise<Share> => {
   return (await api.get(`shares/${id}`)).data;
@@ -175,6 +182,7 @@ export default {
   revertComplete,
   getFileAdditionContext,
   appendFile,
+  removeAdminFile,
   getShareToken,
   get,
   getFromOwner,

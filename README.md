@@ -3,7 +3,7 @@
 Enzimo's security maintenance fork of [stonith404/Pingvin Share](https://github.com/stonith404/pingvin-share).
 The original project's BSD-2-Clause license and contributor history are preserved.
 
-Use `ghcr.io/enzimo/pingvin-share:v1.15.0` for this fork. Read
+Use `ghcr.io/enzimo/pingvin-share:v1.16.0` for this fork. Read
 [the release notes](RELEASE_NOTES.md) before upgrading from the original image,
 especially the proxy, OAuth, and anonymous upload changes.
 

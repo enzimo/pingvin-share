@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   UseGuards,
@@ -22,6 +24,14 @@ export class AdminShareFilesController {
   @Get()
   getUploadContext(@Param("shareId") shareId: string) {
     return this.shares.getFileAdditionContext(shareId);
+  }
+
+  @Delete(":fileId")
+  remove(
+    @Param("shareId") shareId: string,
+    @Param("fileId", new ParseUUIDPipe()) fileId: string,
+  ) {
+    return this.shares.removeFile(shareId, fileId);
   }
 
   @Post()

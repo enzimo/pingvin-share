@@ -132,6 +132,46 @@ console.log(
   "PASS: anonymous reverse upload succeeds and private metadata, downloads and deletion reject outsiders",
 );
 
+const addedId = randomUUID();
+const addition = await fetch(
+  `${base}/api/admin/shares/${id}/files?name=retained.txt&id=${addedId}&chunkIndex=0&totalChunks=1`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      cookie: [...admin].map(([key, value]) => `${key}=${value}`).join("; "),
+    },
+    body: "retained by administrator",
+  },
+);
+assert.equal(addition.status, 201, await addition.clone().text());
+result = await request(`/api/admin/shares/${id}/files/${file.id}`, {
+  method: "DELETE",
+});
+assert.equal(result.status, 401);
+result = await request(`/api/admin/shares/${id}/files/${file.id}`, {
+  method: "DELETE",
+  jar: admin,
+});
+assert.equal(result.status, 200, JSON.stringify(result.data));
+assert.deepEqual(result.data.files, [
+  { id: addedId, name: "retained.txt", size: "25" },
+]);
+result = await request(`/api/shares/${id}/files/${file.id}`, { jar: admin });
+assert.equal(result.status, 404);
+for (let attempt = 0; attempt < 100; attempt++) {
+  result = await request(`/api/shares/${id}/files/zip`, { jar: admin });
+  if (result.status === 200) break;
+  assert.equal(result.status, 409);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+assert.equal(result.status, 200);
+assert.ok(result.data.includes("retained.txt"));
+assert.ok(!result.data.includes("smoke.txt"));
+console.log(
+  "PASS: administrator adds and deletes files, deleted URLs return 404 and the rebuilt ZIP excludes the deleted file",
+);
+
 if (process.env.SMOKE_FRONTEND === "true") {
   result = await request("/_next/image?url=%2Fimg%2Flogo.png&w=640&q=75");
   assert.equal(result.status, 404);

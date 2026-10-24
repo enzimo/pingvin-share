@@ -276,6 +276,15 @@ export default {
   // /admin/shares
   "admin.shares.title": "Share management",
   "admin.shares.add-files": "Add files",
+  "admin.shares.manage-files": "Manage files",
+  "admin.shares.manage-files.title": "Manage files in {id}",
+  "admin.shares.manage-files.description":
+    "Add or delete files here. Changes take effect immediately. The share link and access settings stay the same.",
+  "admin.shares.manage-files.delete-file": "Delete {name}",
+  "admin.shares.manage-files.confirm-delete":
+    "Permanently delete {name} from this share?",
+  "admin.shares.manage-files.last-file":
+    "A share must contain at least one file. Add a replacement first or delete the share.",
   "admin.shares.add-files.choose-files": "Choose files",
   "admin.shares.add-files.dropzone-description":
     "Drop files here or choose files. Up to {size} available.",

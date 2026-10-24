@@ -26,7 +26,7 @@ import { AppendFileDTO } from "./dto/appendFile.dto";
 
 @Injectable()
 export class ShareService {
-  private readonly fileAdditions = new Map<string, Promise<void>>();
+  private readonly fileMutations = new Map<string, Promise<void>>();
   private readonly zipCreations = new Map<string, Promise<void>>();
   private readonly logger = new Logger(ShareService.name);
   constructor(
@@ -196,7 +196,7 @@ export class ShareService {
     }
   }
 
-  private async getShareForFileAddition(id: string) {
+  private async getShareForFileManagement(id: string) {
     const share = await this.prisma.share.findUnique({
       where: { id },
       include: { files: true, reverseShare: true },
@@ -208,16 +208,17 @@ export class ShareService {
     )
       throw new NotFoundException("Share not found");
     if (!share.uploadLocked)
-      throw new ConflictException("Complete the share before adding files");
+      throw new ConflictException("Complete the share before managing files");
     return share;
   }
 
   async getFileAdditionContext(id: string) {
-    const share = await this.getShareForFileAddition(id);
+    const share = await this.getShareForFileManagement(id);
     return {
       id: share.id,
       name: share.name,
       fileNames: share.files.map((file) => file.name),
+      files: share.files.map(({ id, name, size }) => ({ id, name, size })),
       size: share.files.reduce((size, file) => size + Number(file.size), 0),
       maxSize: Math.min(
         Number(this.config.get("share.maxSize")),
@@ -227,11 +228,8 @@ export class ShareService {
   }
 
   async appendFile(id: string, data: string, file: AppendFileDTO) {
-    // Serialize chunks for each share so size checks include earlier partials
-    // and concurrent administrators cannot publish an out-of-date ZIP.
-    const previous = this.fileAdditions.get(id) ?? Promise.resolve();
-    const operation = previous.then(async () => {
-      const share = await this.getShareForFileAddition(id);
+    return this.mutateFiles(id, async () => {
+      const share = await this.getShareForFileManagement(id);
       if (share.files.some((existing) => existing.name === file.name))
         throw new ConflictException("A file with this name already exists");
       if (
@@ -260,15 +258,43 @@ export class ShareService {
       }
       return result;
     });
+  }
+
+  async removeFile(id: string, fileId: string) {
+    return this.mutateFiles(id, async () => {
+      const share = await this.getShareForFileManagement(id);
+      if (!share.files.some((file) => file.id === fileId))
+        throw new NotFoundException("File not found");
+      if (share.files.length <= 1)
+        throw new ConflictException(
+          "A share must contain at least one file. Add a replacement first or delete the share.",
+        );
+
+      // Let any archive using this file finish before removing its contents.
+      // The storage service atomically removes metadata and invalidates the ZIP.
+      await this.zipCreations.get(id)?.catch(() => undefined);
+      await this.fileService.remove(id, fileId);
+      void this.createZip(id).catch((error) =>
+        this.logger.error("Could not prepare share ZIP", error),
+      );
+      return this.getFileAdditionContext(id);
+    });
+  }
+
+  private async mutateFiles<T>(id: string, mutate: () => Promise<T>) {
+    // Share one queue for additions and deletions so quotas, last-file checks
+    // and background archives observe each preceding change.
+    const previous = this.fileMutations.get(id) ?? Promise.resolve();
+    const operation = previous.then(mutate);
     const settled = operation.then(
       () => undefined,
       () => undefined,
     );
-    this.fileAdditions.set(id, settled);
+    this.fileMutations.set(id, settled);
     try {
       return await operation;
     } finally {
-      if (this.fileAdditions.get(id) === settled) this.fileAdditions.delete(id);
+      if (this.fileMutations.get(id) === settled) this.fileMutations.delete(id);
     }
   }
 
@@ -342,7 +368,7 @@ export class ShareService {
   }
 
   async revertComplete(id: string) {
-    if (this.fileAdditions.has(id) || this.zipCreations.has(id))
+    if (this.fileMutations.has(id) || this.zipCreations.has(id))
       throw new ConflictException("Files are being updated");
     return this.prisma.share.update({
       where: { id },

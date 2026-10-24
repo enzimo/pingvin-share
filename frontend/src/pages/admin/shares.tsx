@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { FormattedMessage } from "react-intl";
 import Meta from "../../components/Meta";
 import ManageShareTable from "../../components/admin/shares/ManageShareTable";
-import AddShareFilesModal from "../../components/admin/shares/AddShareFilesModal";
+import ManageShareFilesModal from "../../components/admin/shares/ManageShareFilesModal";
 import useTranslate from "../../hooks/useTranslate.hook";
 import shareService from "../../services/share.service";
 import { MyShare } from "../../types/share.type";
@@ -13,7 +13,7 @@ import toast from "../../utils/toast.util";
 const Shares = () => {
   const [shares, setShares] = useState<MyShare[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [addingToShare, setAddingToShare] = useState<MyShare | null>(null);
+  const [managingShare, setManagingShare] = useState<MyShare | null>(null);
 
   const modals = useModals();
   const t = useTranslate();
@@ -67,13 +67,13 @@ const Shares = () => {
         shares={shares}
         deleteShare={deleteShare}
         isLoading={isLoading}
-        addFiles={setAddingToShare}
+        manageFiles={setManagingShare}
       />
-      {addingToShare && (
-        <AddShareFilesModal
-          key={addingToShare.id}
-          shareId={addingToShare.id}
-          onClose={() => setAddingToShare(null)}
+      {managingShare && (
+        <ManageShareFilesModal
+          key={managingShare.id}
+          shareId={managingShare.id}
+          onClose={() => setManagingShare(null)}
           onSaved={getShares}
         />
       )}

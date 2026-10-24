@@ -1,3 +1,32 @@
+# v1.16.0 admin file management
+
+Administrators can now delete individual files from active, completed shares at
+**Administration → Share management → Manage files**. The dialog lists existing
+files and their sizes, asks for confirmation before deletion, and retains the
+file upload controls introduced in v1.15.0. The image is
+`ghcr.io/enzimo/pingvin-share:v1.16.0` for Linux amd64 and arm64.
+
+Deletion removes the file from the share's original local or S3 storage and
+rebuilds its download ZIP. The share link, password, expiration, ownership,
+visitor limits, recipients, and reverse-share uses stay the same. ZIP downloads
+pause during rebuilding. A download that has already started cannot be recalled.
+
+Shares must retain at least one file. To replace the final file, add its
+replacement first; use the share deletion action to remove the entire share.
+Concurrent administrator additions and deletions share a queue so last-file
+checks and ZIP contents remain consistent. Deletion waits for an existing ZIP
+build to finish before removing a file that it may be reading.
+
+There are no schema changes or new configuration requirements. Back up your
+database, files, and configuration before upgrading. Verification includes 31
+backend regressions, local and S3 deletions, authorization failures, storage
+failure recovery, concurrent edits, and browser checks of addition, confirmation,
+deletion, and the existing public link. Release CI audits all five dependency
+trees, builds and tests both native Docker architectures, scans their contents,
+and verifies anonymous pulls. Full scan reports accompany the release.
+
+---
+
 # v1.15.0 admin file additions
 
 Administrators can add files to an existing share from **Administration → Share
